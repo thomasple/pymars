@@ -1,0 +1,181 @@
+import numpy as np
+from fennol.utils.periodic_table import PERIODIC_TABLE, ATOMIC_MASSES
+from .utils import us, get_composition_string,format_batch_conformations,update_conformation
+from .rotation_utils import apply_random_rotation
+from .repulsion import setup_repulsion_potential
+from .initial_configuration import (
+    read_initial_configuration,
+    sample_velocities,
+    remove_com_velocity,
+    sample_bullets,
+)
+from pathlib import Path
+
+
+def initialize_collision_simulation(simulation_parameters, verbose=True):
+
+    # load initial configuration
+    geometry = simulation_parameters["initial_geometry"]
+    if isinstance(geometry, str):
+        assert Path(geometry).is_file(), f"File {geometry} does not exist."
+        # load from file
+        species, coordinates = read_initial_configuration(geometry)
+    elif isinstance(geometry, dict):
+        # load directly from dict
+        species = np.array(geometry["species"], dtype=np.int32)
+        coordinates = np.array(geometry["coordinates"], dtype=np.float32).reshape(-1, 3)
+    else:
+        raise ValueError("initial_geometry must be a file path or a dictionary")
+
+    if verbose:
+        composition_str = get_composition_string(species)
+        print("# Initial configuration loaded: ", composition_str)
+
+    # batch size for parallel simulations
+    batch_size = simulation_parameters.get("batch_size", 1)
+    assert batch_size >= 1, "batch_size must be at least 1"
+
+    # random rotation
+    do_random_rotation = simulation_parameters.get("random_rotation", True)
+    if do_random_rotation:
+        coordinates = apply_random_rotation(coordinates, n_rotations=batch_size)
+        if verbose:
+            print("# Applied random rotation to initial configuration.")
+    else:
+        coordinates = np.tile(coordinates, (batch_size, 1, 1))  # (batch_size,N,3)
+
+    batch_species = np.tile(species, batch_size)  # (batch_size*N)
+
+    # sample velocities from Maxwell-Boltzmann distribution
+    temperature = simulation_parameters.get("temperature", 0.0)  # Kelvin
+    assert temperature >= 0.0, "Temperature must be non-negative"
+    velocities = sample_velocities(batch_species, temperature).reshape(
+        batch_size, -1, 3
+    )  # (batch_size,N,3)
+    if verbose:
+        print(f"# Sampled velocities at T={temperature} K.")
+
+    # remove center of mass linear and angular velocities
+    for b in range(batch_size):
+        velocities[b] = remove_com_velocity(coordinates[b], velocities[b], species)
+    if verbose:
+        print("# Removed center of mass linear and angular velocities.")
+
+    # coordinates bounding box
+    molecule_radius = np.max(np.linalg.norm(coordinates, axis=-1))  # angstrom
+
+    # initialize bullets
+    bullet_species = simulation_parameters.get("bullet_species", 18)  # default Argon
+    max_impact_parameter = simulation_parameters.get(
+        "max_impact_parameter", 0.5
+    )  # angstrom
+    bullet_distance = simulation_parameters.get(
+        "bullet_distance", 10.0 + 2 * molecule_radius
+    )  # angstrom
+    assert (
+        bullet_distance > 2 * molecule_radius
+    ), f"bullet_distance must be larger than twice molecule radius ({2*molecule_radius:.2f} A)"
+    
+    bullet_temperature = simulation_parameters.get(
+        "bullet_temperature", temperature
+    )  # Kelvin
+    assert bullet_temperature > 0.0, "bullet_temperature must > 0 K"
+    bullet_coordinates,bullets_velocities = sample_bullets(
+        batch_size,
+        temperature=bullet_temperature,
+        distance=bullet_distance,
+        bullet_species=bullet_species,
+        max_impact_parameter=max_impact_parameter,
+    )
+
+    if verbose:
+        bullet_vel = np.linalg.norm(bullets_velocities[0])
+        distance_to_impact = bullet_distance - molecule_radius
+        time_to_impact = us.PS * distance_to_impact / bullet_vel 
+        print(f"# initialized bullets at distance {bullet_distance:.2f} A with temperature {bullet_temperature} K")
+        print(f"# Time before collision: ~{time_to_impact:.2f} ps")
+
+
+
+    model_file = simulation_parameters["model_file"]
+    assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
+
+    from fennol import FENNIX
+    model = FENNIX.load(model_file)
+    model.preproc_state = model.preproc_state.copy({"check_input": False})
+    energy_conv = 1./us.get_multiplier(model.energy_unit)
+
+    initial_conformation = format_batch_conformations(species,coordinates)
+
+    def fennix_energies_and_forces(coordinates):
+        conformation = update_conformation(initial_conformation, coordinates)
+        energies, forces,_ = model.energy_and_forces(**conformation,gpu_preprocessing=True)
+        return np.array(energies)*energy_conv, np.array(forces).reshape(batch_size, -1, 3)*energy_conv
+
+    repulsion_energies_and_forces = setup_repulsion_potential(species, bullet_species)
+
+    def total_energies_and_forces(full_coordinates):
+        coordinates = full_coordinates[:,1:,:]
+        bullet_coordinates = full_coordinates[:,0,:]
+        energies_fennix, forces_fennix = fennix_energies_and_forces(coordinates)
+        energies_repulsion, forces_repulsion, bullet_forces = repulsion_energies_and_forces(
+            coordinates, bullet_coordinates
+        )
+        total_energies = energies_fennix + energies_repulsion
+        total_forces = forces_fennix + forces_repulsion
+
+        # print(energies_fennix, energies_repulsion)
+        full_forces = np.concatenate(
+            [bullet_forces[:, None, :], total_forces], axis=1
+        )  # (batch_size,N+1,3)
+        return total_energies, full_forces
+
+    full_species = np.concatenate(
+        [np.array([bullet_species], dtype=np.int32), species]
+    )  # (N+1,)
+    full_coordinates = np.concatenate(
+        [bullet_coordinates[:, None, :], coordinates], axis=1
+    )  # (batch_size,N+1,3)
+    full_velocities = np.concatenate(
+        [bullets_velocities[:, None, :], velocities], axis=1
+    )  # (batch_size,N+1,3)
+
+    # compute initial accelerations
+    masses = ATOMIC_MASSES[full_species].astype(np.float32)[None,:,None]/us.DA  # (N,)
+    
+    energies, forces = total_energies_and_forces(full_coordinates)
+    accelerations = forces / masses  # (batch_size,N,3)
+
+    # prepare integrator
+    dt = simulation_parameters.get("dt", 1./us.FS)
+    dt2 = dt * 0.5
+    
+    def integrate(initial_coordinates,initial_velocities,accelerations):
+        # Velocity Verlet step
+        velocities = initial_velocities + accelerations * dt2  # (batch_size,N+1,3)
+        coordinates = initial_coordinates + velocities * dt  # (batch_size,N+1,3)
+
+        energies, forces = total_energies_and_forces(coordinates)
+        accelerations = forces / masses  # (batch_size,N+1,3)
+
+        velocities += accelerations * dt2  # (batch_size,N,3)
+
+        return coordinates, velocities, accelerations, energies
+    
+    return {
+        "species": full_species,
+        "masses": masses.reshape(-1),
+        "coordinates": full_coordinates,
+        "velocities": full_velocities,
+        "accelerations": accelerations,
+        "total_energies_and_forces": total_energies_and_forces,
+        "integrate": integrate,
+        "batch_size": batch_size,
+        "dt": dt,
+    }
+
+
+
+
+
+
