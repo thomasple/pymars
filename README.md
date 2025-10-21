@@ -153,4 +153,4 @@ Acknowledgements
 - This project uses FeNNol for model energies & forces and borrows unit conventions and utilities from that ecosystem.
 
 License
-- No license file is included in this repository. Add a LICENSE if you intend to publish the project.
+- This project is licensed under the terms of the GNU LGPLv3 license. See [LICENSE](https://github.com/thomasple/pymars/blob/main/LICENSE) for additional details.
