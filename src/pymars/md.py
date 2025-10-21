@@ -7,7 +7,7 @@ from .initial_configuration import (
     read_initial_configuration,
     sample_velocities,
     remove_com_velocity,
-    sample_bullets,
+    sample_projectiles,
 )
 from pathlib import Path
 
@@ -64,35 +64,35 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     # coordinates bounding box
     molecule_radius = np.max(np.linalg.norm(coordinates, axis=-1))  # angstrom
 
-    # initialize bullets
-    bullet_species = simulation_parameters.get("bullet_species", 18)  # default Argon
+    # initialize projectiles
+    projectile_species = simulation_parameters.get("projectile_species", 18)  # default Argon
     max_impact_parameter = simulation_parameters.get(
         "max_impact_parameter", 0.5
     )  # angstrom
-    bullet_distance = simulation_parameters.get(
-        "bullet_distance", 10.0 + 2 * molecule_radius
+    projectile_distance = simulation_parameters.get(
+        "projectile_distance", 10.0 + 2 * molecule_radius
     )  # angstrom
     assert (
-        bullet_distance > 2 * molecule_radius
-    ), f"bullet_distance must be larger than twice molecule radius ({2*molecule_radius:.2f} A)"
+        projectile_distance > 2 * molecule_radius
+    ), f"projectile_distance must be larger than twice molecule radius ({2*molecule_radius:.2f} A)"
     
-    bullet_temperature = simulation_parameters.get(
-        "bullet_temperature", temperature
+    projectile_temperature = simulation_parameters.get(
+        "projectile_temperature", temperature
     )  # Kelvin
-    assert bullet_temperature > 0.0, "bullet_temperature must > 0 K"
-    bullet_coordinates,bullets_velocities = sample_bullets(
+    assert projectile_temperature > 0.0, "projectile_temperature must > 0 K"
+    projectile_coordinates,projectiles_velocities = sample_projectiles(
         batch_size,
-        temperature=bullet_temperature,
-        distance=bullet_distance,
-        bullet_species=bullet_species,
+        temperature=projectile_temperature,
+        distance=projectile_distance,
+        projectile_species=projectile_species,
         max_impact_parameter=max_impact_parameter,
     )
 
     if verbose:
-        bullet_vel = np.linalg.norm(bullets_velocities[0])
-        distance_to_impact = bullet_distance - molecule_radius
-        time_to_impact = us.PS * distance_to_impact / bullet_vel 
-        print(f"# initialized bullets at distance {bullet_distance:.2f} A with temperature {bullet_temperature} K")
+        projectile_vel = np.linalg.norm(projectiles_velocities[0])
+        distance_to_impact = projectile_distance - molecule_radius
+        time_to_impact = us.PS * distance_to_impact / projectile_vel 
+        print(f"# initialized projectiles at distance {projectile_distance:.2f} A with temperature {projectile_temperature} K")
         print(f"# Time before collision: ~{time_to_impact:.2f} ps")
 
 
@@ -112,32 +112,32 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         energies, forces,_ = model.energy_and_forces(**conformation,gpu_preprocessing=True)
         return np.array(energies)*energy_conv, np.array(forces).reshape(batch_size, -1, 3)*energy_conv
 
-    repulsion_energies_and_forces = setup_repulsion_potential(species, bullet_species)
+    repulsion_energies_and_forces = setup_repulsion_potential(species, projectile_species)
 
     def total_energies_and_forces(full_coordinates):
         coordinates = full_coordinates[:,1:,:]
-        bullet_coordinates = full_coordinates[:,0,:]
+        projectile_coordinates = full_coordinates[:,0,:]
         energies_fennix, forces_fennix = fennix_energies_and_forces(coordinates)
-        energies_repulsion, forces_repulsion, bullet_forces = repulsion_energies_and_forces(
-            coordinates, bullet_coordinates
+        energies_repulsion, forces_repulsion, projectile_forces = repulsion_energies_and_forces(
+            coordinates, projectile_coordinates
         )
         total_energies = energies_fennix + energies_repulsion
         total_forces = forces_fennix + forces_repulsion
 
         # print(energies_fennix, energies_repulsion)
         full_forces = np.concatenate(
-            [bullet_forces[:, None, :], total_forces], axis=1
+            [projectile_forces[:, None, :], total_forces], axis=1
         )  # (batch_size,N+1,3)
         return total_energies, full_forces
 
     full_species = np.concatenate(
-        [np.array([bullet_species], dtype=np.int32), species]
+        [np.array([projectile_species], dtype=np.int32), species]
     )  # (N+1,)
     full_coordinates = np.concatenate(
-        [bullet_coordinates[:, None, :], coordinates], axis=1
+        [projectile_coordinates[:, None, :], coordinates], axis=1
     )  # (batch_size,N+1,3)
     full_velocities = np.concatenate(
-        [bullets_velocities[:, None, :], velocities], axis=1
+        [projectiles_velocities[:, None, :], velocities], axis=1
     )  # (batch_size,N+1,3)
 
     # compute initial accelerations

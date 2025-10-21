@@ -4,7 +4,7 @@ from fennol.utils.io import last_xyz_frame
 from fennol.utils.periodic_table import PERIODIC_TABLE_REV_IDX, ATOMIC_MASSES
 from .utils import us
 
-__all__ = ['read_initial_configuration', 'sample_velocities', 'remove_com_velocity', 'sample_bullets']
+__all__ = ['read_initial_configuration', 'sample_velocities', 'remove_com_velocity', 'sample_projectiles']
 
 
 def read_initial_configuration(filename):
@@ -85,38 +85,38 @@ def remove_com_velocity(coordinates, velocities, species):
     return velocities
 
 
-def sample_bullets(
-    n_bullets, temperature, distance, max_impact_parameter=0.5, bullet_species=18
+def sample_projectiles(
+    n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18
 ):
-    """Sample bullet initial positions and velocities for collision simulations.
+    """Sample projectile initial positions and velocities for collision simulations.
 
     Args:
-     - n_bullets: number of bullets to sample
+     - n_projectiles: number of projectiles to sample
      - temperature: temperature in Kelvin for velocity sampling
-    - distance: initial distance of bullets from origin along -x direction (in angstroms)
+    - distance: initial distance of projectiles from origin along -x direction (in angstroms)
         - max_impact_parameter: maximum impact parameter in angstroms (default 0.5)
     Returns:
-     - bullet_positions: array of shape (n_bullets,3) with initial positions
-     - bullet_velocities: array of shape (n_bullets,3) with initial velocities
+     - projectile_positions: array of shape (n_projectiles,3) with initial positions
+     - projectile_velocities: array of shape (n_projectiles,3) with initial velocities
     """
 
     E = 1.5 * us.K_B * temperature  # average kinetic energy per particle
-    mass_bullet = ATOMIC_MASSES[bullet_species] / us.DA  # in amu
-    v_magnitude = np.sqrt(2 * E / mass_bullet)
-    bullet_velocities = np.zeros((n_bullets, 3), dtype=np.float32)
-    bullet_velocities[:, 0] = v_magnitude  # bullets move along x
+    mass_projectile = ATOMIC_MASSES[projectile_species] / us.DA  # in amu
+    v_magnitude = np.sqrt(2 * E / mass_projectile)
+    projectile_velocities = np.zeros((n_projectiles, 3), dtype=np.float32)
+    projectile_velocities[:, 0] = v_magnitude  # projectiles move along x
 
     # Sample impact parameters uniformly within a circle of radius max_impact_parameter
-    r = max_impact_parameter * np.sqrt(np.random.uniform(0, 1, size=n_bullets))
-    theta = np.random.uniform(0, 2 * np.pi, size=n_bullets)
+    r = max_impact_parameter * np.sqrt(np.random.uniform(0, 1, size=n_projectiles))
+    theta = np.random.uniform(0, 2 * np.pi, size=n_projectiles)
     y = r * np.cos(theta)
     z = r * np.sin(theta)
-    bullet_positions = np.zeros((n_bullets, 3), dtype=np.float32)
-    bullet_positions[:, 0] = -distance  # start at -distance along x
-    bullet_positions[:, 1] = y
-    bullet_positions[:, 2] = z
+    projectile_positions = np.zeros((n_projectiles, 3), dtype=np.float32)
+    projectile_positions[:, 0] = -distance  # start at -distance along x
+    projectile_positions[:, 1] = y
+    projectile_positions[:, 2] = z
 
-    return bullet_positions, bullet_velocities
+    return projectile_positions, projectile_velocities
 
 
 

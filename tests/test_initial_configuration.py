@@ -1,6 +1,6 @@
 import numpy as np
 
-from pymars.initial_configuration import read_initial_configuration, sample_velocities, remove_com_velocity, sample_bullets
+from pymars.initial_configuration import read_initial_configuration, sample_velocities, remove_com_velocity, sample_projectiles
 from fennol.utils.periodic_table import ATOMIC_MASSES
 from pymars.utils import us
 
@@ -52,29 +52,29 @@ def test_remove_com_velocity(test_data_dir):
     L_after = np.sum(np.cross(coordinates, velocities_corrected) * masses[:, None], axis=0)
     assert np.allclose(L_after, 0.0, atol=1e-4), "COM angular velocity not removed"
 
-def test_bullet_initialization():
-    n_bullets = 1000
-    bullet_species = 6  # Carbon
+def test_projectile_initialization():
+    n_projectiles = 1000
+    projectile_species = 6  # Carbon
     temperature = 300.0  # Kelvin
     distance = 5.0  # angstrom
     max_impact_parameter = 1.0  # angstrom
 
 
     E = 1.5 * us.K_B * temperature  # average kinetic energy per particle
-    excepted_speed = np.array([np.sqrt(2 * E / (ATOMIC_MASSES[bullet_species] / us.DA)),0.,0.])
+    excepted_speed = np.array([np.sqrt(2 * E / (ATOMIC_MASSES[projectile_species] / us.DA)),0.,0.])
     
-    bullet_positions, bullet_velocities = sample_bullets(
-        n_bullets, temperature, distance=distance, max_impact_parameter=max_impact_parameter,bullet_species=bullet_species
+    projectile_positions, projectile_velocities = sample_projectiles(
+        n_projectiles, temperature, distance=distance, max_impact_parameter=max_impact_parameter,projectile_species=projectile_species
     )
-    assert bullet_positions.shape == (n_bullets, 3), "Incorrect bullet positions shape"
-    assert bullet_velocities.shape == (n_bullets, 3) , "Incorrect bullet velocities shape"
-    assert np.allclose(bullet_velocities,excepted_speed[None,:]), f"Bullet speeds do not match expected average speed"
+    assert projectile_positions.shape == (n_projectiles, 3), "Incorrect projectile positions shape"
+    assert projectile_velocities.shape == (n_projectiles, 3) , "Incorrect projectile velocities shape"
+    assert np.allclose(projectile_velocities,excepted_speed[None,:]), f"projectile speeds do not match expected average speed"
 
     # Check that positions are within the specified impact parameter
-    impact_parameters = np.linalg.norm(bullet_positions[:, 1:3], axis=1)
-    assert np.all(impact_parameters <= max_impact_parameter + 1e-6), "Some bullets exceed the maximum impact parameter"
-    # Check that all bullets are initialized at the correct distance
-    assert np.allclose(bullet_positions[:, 0], -distance), "Bullets not initialized at the correct position"
+    impact_parameters = np.linalg.norm(projectile_positions[:, 1:3], axis=1)
+    assert np.all(impact_parameters <= max_impact_parameter + 1e-6), "Some projectiles exceed the maximum impact parameter"
+    # Check that all projectiles are initialized at the correct distance
+    assert np.allclose(projectile_positions[:, 0], -distance), "projectiles not initialized at the correct position"
 
 
 
