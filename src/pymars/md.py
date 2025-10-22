@@ -114,7 +114,8 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         import torch
         import dxtb
 
-        opts = {"batch_mode": 2}
+        opts = {"batch_mode": 2, "cache_enabled": True}
+        dxtb.OutputHandler.verbosity = 0  # suppress output
         torch_device = simulation_parameters.get("torch_device", "cpu")
         dd = {"dtype": torch.float32, "device": torch.device(torch_device)}
         species_torch = torch.tensor(
@@ -122,34 +123,35 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         )
         if model_file.upper() in ["GFN2", "GFN2-XTB", "GFN2XTB", "XTB"]:
             print("# Using GFN2-XTB model.")
-            model = dxtb.calculators.GFN2Calculator(species_torch, opts=opts,**dd)
+            model = dxtb.calculators.GFN2Calculator(species_torch, opts=opts, **dd)
+            forces_calc = model.forces
             from .gfn_references import GFN2_REF_ENERGIES
             ref_energy = GFN2_REF_ENERGIES[species].sum()
         elif model_file.upper() in ["GFN1", "GFN1-XTB", "GFN1XTB"]:
             print("# Using GFN1-XTB model.")
-            model = dxtb.calculators.GFN1Calculator(species_torch, opts=opts,**dd)
+            model = dxtb.calculators.GFN1Calculator(species_torch, opts=opts, **dd)
+            forces_calc = model.forces_analytical
             from .gfn_references import GFN1_REF_ENERGIES
             ref_energy = GFN1_REF_ENERGIES[species].sum()
         else:
             raise ValueError(f"Unknown GFN-XTB model: {model_file}")
 
-        dxtb.OutputHandler.verbosity = 0  # suppress output
         energy_conv = 1.0 / us.HARTREE
-        force_conv = -1.0 / (us.HARTREE / us.BOHR)
-        charge = torch.tensor(
-            [total_charge] * batch_size, device=dd["device"], dtype=torch.float32
-        ).reshape(batch_size, 1)
+        force_conv = 1.0 / (us.HARTREE / us.BOHR)
+        charge = torch.tensor([total_charge] * batch_size, **dd).reshape(batch_size, 1)
 
         def model_energies_and_forces(coordinates):
             model.reset()
             coords_torch = torch.tensor(coordinates * us.BOHR, **dd).requires_grad_(
                 True
             )
-            energies = model.get_energy(coords_torch, chrg=charge)
-            dedx = torch.autograd.grad(energies.sum(), coords_torch)[0]
+            forces = forces_calc(coords_torch, chrg=charge)
+            energies = model.cache["energy"]
+            # energies = model.get_energy(coords_torch, chrg=charge)
+            # forces = -torch.autograd.grad(energies.sum(), coords_torch)[0]
             return (
-                (energies.detach().cpu().numpy()-ref_energy) * energy_conv,
-                dedx.detach().cpu().numpy() * force_conv,
+                (energies.detach().cpu().numpy() - ref_energy) * energy_conv,
+                forces.detach().cpu().numpy() * force_conv,
             )
 
     else:
