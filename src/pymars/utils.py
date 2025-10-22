@@ -8,7 +8,9 @@ __all__ = ['us','format_batch_conformations','update_conformation','get_composit
 us = UnitSystem(L="angstrom",T="ps",E="kcalpermol")
 
 
-def format_batch_conformations(species,coordinates):
+
+
+def format_batch_conformations(species,coordinates,total_charge=0):
     """Format batch conformations into a dictionary for FeNNol model processing.
 
     Args:
@@ -18,16 +20,17 @@ def format_batch_conformations(species,coordinates):
      - conformation: dict with keys 'species', 'coordinates','natoms','batch_index'
     """
     
-    M, Nat = coordinates.shape[0:2]
-    species_batch = np.tile(species, M)  # (M * Nat,)
+    batch_size, Nat = coordinates.shape[0:2]
+    species_batch = np.tile(species, batch_size)  # (M * Nat,)
     coordinates_batch = coordinates.reshape(-1, 3)  # (M * Nat, 3)
-    batch_index = np.repeat(np.arange(M,dtype=np.int32), Nat)  # (M * Nat,)
-    natoms_batch = np.array([Nat] * M,dtype=np.int32)  # list of length M
+    batch_index = np.repeat(np.arange(batch_size,dtype=np.int32), Nat)  # (M * Nat,)
+    natoms_batch = np.array([Nat] * batch_size,dtype=np.int32)  # list of length M
     return {
         'species': jnp.array(species_batch,dtype=jnp.int32),
         'coordinates': jnp.array(coordinates_batch,dtype=jnp.float32),
         'natoms': jnp.array(natoms_batch,dtype=jnp.int32),
-        'batch_index': jnp.array(batch_index,dtype=jnp.int32)
+        'batch_index': jnp.array(batch_index,dtype=jnp.int32),
+        'total_charge': jnp.array([total_charge]*batch_size,dtype=jnp.int32),
     }
 
 def update_conformation(conformation, new_coordinates):
