@@ -44,6 +44,7 @@ def uniform_orientation(n,indices=None, offset=0.5):
     return oris
 
 def generate_fibonacci_sphere(n=1000, offset=0.5):
+    """Generate a spherical grid of n points using Fibonacci lattice."""
     i = np.arange(n)
     theta = (math.pi * i * (1 + math.sqrt(5))) % (2 * math.pi)
     phi = np.arccos(1 - 2 * (i + offset) / (n - 1 + 2 * offset))
@@ -53,6 +54,7 @@ def generate_fibonacci_sphere(n=1000, offset=0.5):
     return np.stack((x, y, z), axis=-1)
 
 def apply_fibonacci_random_rotation(atoms):
+    """Applies a random rotation with axes generation using the Fibonacci lattice spherical sampling"""
     coords = np.array([atom[1:] for atom in atoms])
     fib_points = generate_fibonacci_sphere(n=1000)
     axis = fib_points[np.random.randint(len(fib_points))]
