@@ -1,6 +1,8 @@
 import argparse
 import yaml
 import numpy as np
+import os
+import jax
 
 
 __all__ = []
@@ -20,6 +22,33 @@ def main() -> None:
     from fennol.utils.input_parser import convert_dict_units
     from .utils import us
     simulation_parameters = convert_dict_units(simulation_parameters, us)
+
+    ### Set the device
+    if "MARS_DEVICE" in os.environ:
+        device = os.environ["MARS_DEVICE"].lower()
+        print(f"# Setting device from env MARS_DEVICE={device}")
+    else:
+        device = simulation_parameters.get("device", "cpu").lower()
+        """@keyword[fennol_md] device
+        Computation device. Options: 'cpu', 'cuda:N', 'gpu:N' where N is device number.
+        Default: 'cpu'
+        """
+    if device == "cpu":
+        jax.config.update("jax_platforms", "cpu")
+        jax.config.update("jax_cuda_visible_devices", "")
+        simulation_parameters["torch_device"] = "cpu"
+    elif device.startswith("cuda") or device.startswith("gpu"):
+        if ":" in device:
+            num = device.split(":")[-1]
+            jax.config.update("jax_cuda_visible_devices", num)
+        else:
+            jax.config.update("jax_cuda_visible_devices", "0")
+        device = "gpu"
+        simulation_parameters["torch_device"] = "cuda:0"
+
+    _device = jax.devices(device)[0]
+    jax.config.update("jax_default_device", _device)
+    jax.config.update("jax_default_matmul_precision", "highest")
 
     from .md import initialize_collision_simulation
     system = initialize_collision_simulation(simulation_parameters)

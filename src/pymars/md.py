@@ -97,34 +97,61 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
 
 
 
-    model_file = simulation_parameters["model_file"]
-    assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
+    model_file = simulation_parameters["model"]
+    assert isinstance(model_file, str), "model must be a string"
+    if model_file.upper()[:3] in ["GFN","XTB"]:
+        print("# Using GFN-XTB model for the molecular system.")
+        import torch
+        import dxtb
+        assert batch_size == 1, "Batch size > 1 not supported for GFN-XTB models."
+        torch_device = simulation_parameters.get("torch_device", "cpu")
+        dd = {"dtype": torch.float32, "device": torch.device(torch_device)}
+        species_torch = torch.tensor(species,device=dd["device"],dtype=torch.long)
+        if model_file.upper() in ["GFN2","GFN2-XTB","GFN2XTB","XTB"]:
+            model = dxtb.calculators.GFN2Calculator(species_torch, **dd)
+        elif model_file.upper() in ["GFN1","GFN1-XTB","GFN1XTB"]:
+            model = dxtb.calculators.GFN1Calculator(species_torch, **dd)
+        else:
+            raise ValueError(f"Unknown GFN-XTB model: {model_file}")
 
-    from fennol import FENNIX
-    model = FENNIX.load(model_file)
-    model.preproc_state = model.preproc_state.copy({"check_input": False})
-    energy_conv = 1./us.get_multiplier(model.energy_unit)
+        dxtb.OutputHandler.verbosity = 0  # suppress output
+        energy_conv = 1./us.HARTREE
+        force_conv = -1. / (us.HARTREE/us.BOHR)
+        charge = torch.tensor(0,device=dd["device"],dtype=torch.float32)
+        
+        def model_energies_and_forces(coordinates):
+            model.reset()
+            coords_torch = torch.tensor(coordinates[0]*us.BOHR, **dd).requires_grad_(True)
+            energy = model.get_energy(coords_torch,chrg=charge)
+            (g,) = torch.autograd.grad(energy, coords_torch)
+            return np.array([energy.item()])*energy_conv, g.detach().cpu().numpy().reshape(1, -1, 3)*force_conv
+    else:
+        assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
+        print(f"# Using FENNIX model from file: {model_file}")
+        from fennol import FENNIX
+        model = FENNIX.load(model_file)
+        model.preproc_state = model.preproc_state.copy({"check_input": False})
+        energy_conv = 1./us.get_multiplier(model.energy_unit)
 
-    initial_conformation = format_batch_conformations(species,coordinates)
+        initial_conformation = format_batch_conformations(species,coordinates)
 
-    def fennix_energies_and_forces(coordinates):
-        conformation = update_conformation(initial_conformation, coordinates)
-        energies, forces,_ = model.energy_and_forces(**conformation,gpu_preprocessing=True)
-        return np.array(energies)*energy_conv, np.array(forces).reshape(batch_size, -1, 3)*energy_conv
+        def model_energies_and_forces(coordinates):
+            conformation = update_conformation(initial_conformation, coordinates)
+            energies, forces,_ = model.energy_and_forces(**conformation,gpu_preprocessing=True)
+            return np.array(energies)*energy_conv, np.array(forces).reshape(batch_size, -1, 3)*energy_conv
 
     repulsion_energies_and_forces = setup_repulsion_potential(species, projectile_species)
 
     def total_energies_and_forces(full_coordinates):
         coordinates = full_coordinates[:,1:,:]
         projectile_coordinates = full_coordinates[:,0,:]
-        energies_fennix, forces_fennix = fennix_energies_and_forces(coordinates)
+        energies_model, forces_model = model_energies_and_forces(coordinates)
         energies_repulsion, forces_repulsion, projectile_forces = repulsion_energies_and_forces(
             coordinates, projectile_coordinates
         )
-        total_energies = energies_fennix + energies_repulsion
-        total_forces = forces_fennix + forces_repulsion
+        total_energies = energies_model + energies_repulsion
+        total_forces = forces_model + forces_repulsion
 
-        # print(energies_fennix, energies_repulsion)
         full_forces = np.concatenate(
             [projectile_forces[:, None, :], total_forces], axis=1
         )  # (batch_size,N+1,3)
