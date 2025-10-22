@@ -43,26 +43,16 @@ def uniform_orientation(n,indices=None, offset=0.5):
         return oris[0]
     return oris
 
-def generate_fibonacci_sphere(n=1000, offset=0.5):
-    """Generate a spherical grid of n points using Fibonacci lattice."""
-    i = np.arange(n)
-    theta = (math.pi * i * (1 + math.sqrt(5))) % (2 * math.pi)
-    phi = np.arccos(1 - 2 * (i + offset) / (n - 1 + 2 * offset))
-    x = np.sin(phi) * np.cos(theta)
-    y = np.sin(phi) * np.sin(theta)
-    z = np.cos(phi)
-    return np.stack((x, y, z), axis=-1)
-
-def apply_fibonacci_random_rotation(atoms):
+def apply_fibonacci_random_rotation(coords,n=1000, n_rotations=None):
     """Applies a random rotation with axes generation using the Fibonacci lattice spherical sampling"""
-    coords = np.array([atom[1:] for atom in atoms])
-    fib_points = generate_fibonacci_sphere(n=1000)
-    axis = fib_points[np.random.randint(len(fib_points))]
-    angle = np.random.uniform(0, 2*np.pi)
-    r = R.from_rotvec(angle * axis)
-    rotated_coords = r.apply(coords)
-    rotated_atoms = [[atom[0]] + rotated_coords[i].tolist() for i, atom in enumerate(atoms)]
-    return rotated_atoms
+    nrot = 1 if n_rotations is None else n_rotations
+    indices = np.random.randint(0,n, size=nrot)
+    axis = uniform_orientation(n, indices=indices)
+    angle = np.random.uniform(0, 2*np.pi,size=nrot)
+    M = R.from_rotvec(angle * axis).as_matrix()
+    rotated_coordinates = np.einsum('rij,nj->rni', M, coords)
+    return rotated_coordinates[0] if n_rotations is None else rotated_coordinates
+
 
 def random_orientations(size,n=10_000):
     """Generate random orientations by sampling from a uniform spherical grid."""
