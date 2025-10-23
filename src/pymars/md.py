@@ -109,73 +109,27 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         print(f"# Time before collision: ~{time_to_impact:.2f} ps")
 
     model_file = simulation_parameters["model"]
-    assert isinstance(model_file, str), "model must be a string"
-    if model_file.upper()[:3] in ["GFN", "XTB"]:
-        import torch
-        import dxtb
+    assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
+    print(f"# Using FENNIX model from file: {model_file}")
+    from fennol import FENNIX
 
-        opts = {"batch_mode": 2, "cache_enabled": True}
-        dxtb.OutputHandler.verbosity = 0  # suppress output
-        torch_device = simulation_parameters.get("torch_device", "cpu")
-        dd = {"dtype": torch.float32, "device": torch.device(torch_device)}
-        species_torch = torch.tensor(
-            batch_species.reshape(batch_size, -1), device=dd["device"]
+    model = FENNIX.load(model_file)
+    model.preproc_state = model.preproc_state.copy({"check_input": False})
+    energy_conv = 1.0 / us.get_multiplier(model.energy_unit)
+
+    initial_conformation = format_batch_conformations(
+        species, coordinates, total_charge=total_charge
+    )
+
+    def model_energies_and_forces(coordinates):
+        conformation = update_conformation(initial_conformation, coordinates)
+        energies, forces, _ = model.energy_and_forces(
+            **conformation, gpu_preprocessing=True
         )
-        if model_file.upper() in ["GFN2", "GFN2-XTB", "GFN2XTB", "XTB"]:
-            print("# Using GFN2-XTB model.")
-            model = dxtb.calculators.GFN2Calculator(species_torch, opts=opts, **dd)
-            forces_calc = model.forces
-            from .gfn_references import GFN2_REF_ENERGIES
-            ref_energy = GFN2_REF_ENERGIES[species].sum()
-        elif model_file.upper() in ["GFN1", "GFN1-XTB", "GFN1XTB"]:
-            print("# Using GFN1-XTB model.")
-            model = dxtb.calculators.GFN1Calculator(species_torch, opts=opts, **dd)
-            forces_calc = model.forces_analytical
-            from .gfn_references import GFN1_REF_ENERGIES
-            ref_energy = GFN1_REF_ENERGIES[species].sum()
-        else:
-            raise ValueError(f"Unknown GFN-XTB model: {model_file}")
-
-        energy_conv = 1.0 / us.HARTREE
-        force_conv = 1.0 / (us.HARTREE / us.BOHR)
-        charge = torch.tensor([total_charge] * batch_size, **dd).reshape(batch_size, 1)
-
-        def model_energies_and_forces(coordinates):
-            model.reset()
-            coords_torch = torch.tensor(coordinates * us.BOHR, **dd).requires_grad_(
-                True
-            )
-            forces = forces_calc(coords_torch, chrg=charge)
-            energies = model.cache["energy"]
-            # energies = model.get_energy(coords_torch, chrg=charge)
-            # forces = -torch.autograd.grad(energies.sum(), coords_torch)[0]
-            return (
-                (energies.detach().cpu().numpy() - ref_energy) * energy_conv,
-                forces.detach().cpu().numpy() * force_conv,
-            )
-
-    else:
-        assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
-        print(f"# Using FENNIX model from file: {model_file}")
-        from fennol import FENNIX
-
-        model = FENNIX.load(model_file)
-        model.preproc_state = model.preproc_state.copy({"check_input": False})
-        energy_conv = 1.0 / us.get_multiplier(model.energy_unit)
-
-        initial_conformation = format_batch_conformations(
-            species, coordinates, total_charge=total_charge
+        return (
+            np.array(energies) * energy_conv,
+            np.array(forces).reshape(batch_size, -1, 3) * energy_conv,
         )
-
-        def model_energies_and_forces(coordinates):
-            conformation = update_conformation(initial_conformation, coordinates)
-            energies, forces, _ = model.energy_and_forces(
-                **conformation, gpu_preprocessing=True
-            )
-            return (
-                np.array(energies) * energy_conv,
-                np.array(forces).reshape(batch_size, -1, 3) * energy_conv,
-            )
 
     repulsion_energies_and_forces = setup_repulsion_potential(
         species, projectile_species

@@ -9,8 +9,6 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "fennol[cuda]>=2025.9.30",
-    "torch<2.5", 
-    "dxtb[libcint]>=0.3.0",
 ]
 
 [project.scripts]
