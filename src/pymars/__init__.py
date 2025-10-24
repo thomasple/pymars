@@ -3,6 +3,7 @@ import yaml
 import numpy as np
 import os
 import jax
+import time
 
 
 __all__ = []
@@ -70,9 +71,15 @@ def main() -> None:
     print_step = simulation_parameters.get("print_step", 100)
 
     output_file = simulation_parameters.get("output_file", "trajectory.xyz")
+    assert output_file.endswith(".xyz"), "Only .xyz output format is supported currently."
     from fennol.utils.io import write_xyz_frame
-    ftraj = open(output_file, "w")
-    import time
+    if batch_size ==1:
+        ftraj = [open(output_file, "w")]
+    else:
+        num=len(str(batch_size-1))
+        ftraj = [open(output_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
+
+
     time_start = time.time()
     time0 = time_start
     print(f"#{'Step':>10} {'Time':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
@@ -98,14 +105,16 @@ def main() -> None:
             )
             com = np.mean(coordinates[:,1:,:], axis=1, keepdims=True)
             coordinates -= com  # center at COM
-            write_xyz_frame(
-                ftraj,
-                species,
-                coordinates[0],  # write first trajectory only
-                comment=f"Step {istep+1} E_tot={total_energy:.6f} E_pot={potential_energy:.6f} E_kin={ekin:.6f}",
-            )
+            for i in range(batch_size):
+                write_xyz_frame(
+                    ftraj[i],
+                    species,
+                    coordinates[i],
+                    comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
+                )
 
-    ftraj.close()
+    for f in ftraj: 
+        f.close()
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
     nsperdat = (simulation_time / total_time)*60*60*24*us.NS
