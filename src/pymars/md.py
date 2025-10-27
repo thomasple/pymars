@@ -15,6 +15,8 @@ from .initial_configuration import (
     sample_projectiles,
 )
 from pathlib import Path
+import jax.numpy as jnp
+import jax
 
 
 def initialize_collision_simulation(simulation_parameters, verbose=True):
@@ -121,31 +123,23 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         species, coordinates, total_charge=total_charge
     )
 
-    def model_energies_and_forces(coordinates):
-        conformation = update_conformation(initial_conformation, coordinates)
-        energies, forces, _ = model.energy_and_forces(
-            **conformation, gpu_preprocessing=True
-        )
-        return (
-            np.array(energies) * energy_conv,
-            np.array(forces).reshape(batch_size, -1, 3) * energy_conv,
-        )
 
     repulsion_energies_and_forces = setup_repulsion_potential(
-        species, projectile_species
+        species, projectile_species, use_jax=True
     )
 
-    def total_energies_and_forces(full_coordinates):
+    def total_energies_and_forces(full_coordinates,conformation):
         coordinates = full_coordinates[:, 1:, :]
         projectile_coordinates = full_coordinates[:, 0, :]
-        energies_model, forces_model = model_energies_and_forces(coordinates)
+        # energies_model, forces_model = model_energies_and_forces(coordinates)
+        energies_model, forces_model, _ = model._energy_and_forces(model.variables, conformation)
         energies_repulsion, forces_repulsion, projectile_forces = (
             repulsion_energies_and_forces(coordinates, projectile_coordinates)
         )
-        total_energies = energies_model + energies_repulsion
-        total_forces = forces_model + forces_repulsion
+        total_energies = energies_model*energy_conv + energies_repulsion
+        total_forces = forces_model.reshape(batch_size,-1,3)*energy_conv + forces_repulsion
 
-        full_forces = np.concatenate(
+        full_forces = jnp.concatenate(
             [projectile_forces[:, None, :], total_forces], axis=1
         )  # (batch_size,N+1,3)
         return total_energies, full_forces
@@ -165,31 +159,50 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         ATOMIC_MASSES[full_species].astype(np.float32)[None, :, None] / us.DA
     )  # (N,)
 
-    energies, forces = total_energies_and_forces(full_coordinates)
+    conformation = model.preprocess(use_gpu=True,**initial_conformation)
+    energies, forces = total_energies_and_forces(full_coordinates,conformation)
     accelerations = forces / masses  # (batch_size,N,3)
 
     # prepare integrator
     dt = simulation_parameters.get("dt", 1.0 / us.FS)
     dt2 = dt * 0.5
 
-    def integrate(initial_coordinates, initial_velocities, accelerations):
-        # Velocity Verlet step
-        velocities = initial_velocities + accelerations * dt2  # (batch_size,N+1,3)
-        coordinates = initial_coordinates + velocities * dt  # (batch_size,N+1,3)
-
-        energies, forces = total_energies_and_forces(coordinates)
+    @jax.jit
+    def integrate_part1(coordinates, velocities, accelerations):
+        # Velocity Verlet step - part 1
+        velocities = velocities + accelerations * dt2  # (batch_size,N+1,3)
+        coordinates = coordinates + velocities * dt  # (batch_size,N+1,3)
+        return coordinates, velocities
+    
+    @jax.jit
+    def integrate_part2(coordinates, velocities,conformation):
+        energies, forces = total_energies_and_forces(coordinates,conformation)
         accelerations = forces / masses  # (batch_size,N+1,3)
 
-        velocities += accelerations * dt2  # (batch_size,N,3)
+        velocities = velocities + accelerations * dt2  # (batch_size,N,3)
+        return velocities, accelerations, energies
+
+    def integrate(initial_coordinates, initial_velocities, accelerations):
+        # Velocity Verlet step
+        coordinates, velocities = integrate_part1(
+            initial_coordinates, initial_velocities, accelerations
+        )
+        
+        conformation = model.preprocess(use_gpu=True,**update_conformation(
+            initial_conformation, coordinates[:,1:,:]))
+
+        velocities, accelerations, energies = integrate_part2(
+            coordinates, velocities,conformation
+        )
 
         return coordinates, velocities, accelerations, energies
 
     return {
         "species": full_species,
         "masses": masses.reshape(-1),
-        "coordinates": full_coordinates,
-        "velocities": full_velocities,
-        "accelerations": accelerations,
+        "coordinates": jnp.array(full_coordinates,dtype=jnp.float32),
+        "velocities": jnp.array(full_velocities,dtype=jnp.float32),
+        "accelerations": jnp.array(accelerations,dtype=jnp.float32),
         "total_energies_and_forces": total_energies_and_forces,
         "integrate": integrate,
         "batch_size": batch_size,

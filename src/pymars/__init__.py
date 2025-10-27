@@ -3,6 +3,7 @@ import yaml
 import numpy as np
 import os
 import jax
+import jax.numpy as jnp
 import time
 
 
@@ -79,6 +80,16 @@ def main() -> None:
         num=len(str(batch_size-1))
         ftraj = [open(output_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
 
+    @jax.jit
+    def mean_energies_and_remove_com(coordinates, velocities,epots):
+        com = jnp.mean(coordinates[:,1:,:], axis=1, keepdims=True)
+        coordinates = coordinates - com  # center at COM
+        ekin = 0.5 * jnp.sum(
+            masses[None,:] * jnp.sum(velocities**2, axis=-1)
+        ) / batch_size  # kcal/mol
+        epot = jnp.mean(epots)
+        return coordinates, ekin+epot, epot, ekin
+        
 
     time_start = time.time()
     time0 = time_start
@@ -95,21 +106,19 @@ def main() -> None:
             ns_per_step = dt*us.NS
             ns_per_day = ns_per_step * step_per_day
 
-            ekin = 0.5 * np.sum(
-                masses[None,:] * np.sum(velocities**2, axis=-1)
-            ) / batch_size  # kcal/mol
-            potential_energy = np.mean(energies)
-            total_energy = ekin + potential_energy
+            coordinates, total_energy, potential_energy, ekin = mean_energies_and_remove_com(
+                coordinates, velocities,energies
+            )
+
             print(
                 f" {istep+1:10} {(istep+1)*dt:12.2f} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
             )
-            com = np.mean(coordinates[:,1:,:], axis=1, keepdims=True)
-            coordinates -= com  # center at COM
+            coords = np.array(coordinates)
             for i in range(batch_size):
                 write_xyz_frame(
                     ftraj[i],
                     species,
-                    coordinates[i],
+                    coords[i],
                     comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                 )
 

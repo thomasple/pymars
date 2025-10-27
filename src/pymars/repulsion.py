@@ -1,7 +1,8 @@
-import numpy as np
+import numpy as onp
 from .utils import us
+import jax.numpy as jnp
 
-def setup_repulsion_potential(target_species, projectile_species):
+def setup_repulsion_potential(target_species, projectile_species, use_jax=False):
     """Setup a ZBL repulsion potential between projectiles and target atoms.
 
     Args:
@@ -13,17 +14,17 @@ def setup_repulsion_potential(target_species, projectile_species):
 
     d = 0.46850
     p = 0.23
-    alphas = np.array((3.19980, 0.94229, 0.40290, 0.20162))
-    cs = np.array((0.18175273, 0.5098655, 0.28021213, 0.0281697))[None,:]
+    alphas = onp.array((3.19980, 0.94229, 0.40290, 0.20162))
+    cs = onp.array((0.18175273, 0.5098655, 0.28021213, 0.0281697))[None,:]
 
-    Z = target_species.astype(np.float64)
+    Z = target_species.astype(onp.float32)
     Zb = float(projectile_species)
     Zpij = (Z**p + Zb**p)/d
 
     alphaij = -alphas[None,:]*Zpij[:,None]
 
     Zij = Z*Zb *us.BOHR/us.HARTREE 
-
+    np = jnp if use_jax else onp
 
     def repulsion_energies_and_forces(coordinates, projectile_coordinates):
         """Compute ZBL repulsion energies and forces.
