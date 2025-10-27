@@ -71,14 +71,16 @@ def main() -> None:
 
     print_step = simulation_parameters.get("print_step", 100)
 
-    output_file = simulation_parameters.get("output_file", "trajectory.xyz")
-    assert output_file.endswith(".xyz"), "Only .xyz output format is supported currently."
-    from fennol.utils.io import write_xyz_frame
-    if batch_size ==1:
-        ftraj = [open(output_file, "w")]
-    else:
-        num=len(str(batch_size-1))
-        ftraj = [open(output_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
+    traj_file = str(simulation_parameters.get("traj_file", "trajectory.xyz"))
+    write_traj = traj_file.lower() != "none"
+    if write_traj:
+        assert traj_file.endswith(".xyz"), "Only .xyz output format is supported currently."
+        from fennol.utils.io import write_xyz_frame
+        if batch_size ==1:
+            ftraj = [open(traj_file, "w")]
+        else:
+            num=len(str(batch_size-1))
+            ftraj = [open(traj_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
 
     @jax.jit
     def mean_energies_and_remove_com(coordinates, velocities,epots):
@@ -113,21 +115,23 @@ def main() -> None:
             print(
                 f" {istep+1:10} {(istep+1)*dt:12.2f} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
             )
-            coords = np.array(coordinates)
-            for i in range(batch_size):
-                write_xyz_frame(
-                    ftraj[i],
-                    species,
-                    coords[i],
-                    comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
-                )
+            if write_traj:
+                coords = np.array(coordinates)
+                for i in range(batch_size):
+                    write_xyz_frame(
+                        ftraj[i],
+                        species,
+                        coords[i],
+                        comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
+                    )
 
-    for f in ftraj: 
-        f.close()
+    if write_traj:
+        for f in ftraj: 
+            f.close()
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
-    nsperdat = (simulation_time / total_time)*60*60*24*us.NS
-    print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperdat:.1f} ns/day)")
+    nsperday = (simulation_time / total_time)*60*60*24*us.NS
+    print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
 
 
 if __name__ == "__main__":
