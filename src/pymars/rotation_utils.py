@@ -15,8 +15,9 @@ def apply_random_rotation(coords, n_rotations=None):
     - rotated_coordinates: rotated array of shape (n_rotations,N,3) or (N,3) if n_rotations is None
     """
     nrot = 1 if n_rotations is None else n_rotations
-    angles = np.random.uniform(0,2*np.pi,size=(nrot,3))
-    M = R.from_euler('zyx', angles, degrees=False).as_matrix() # (nrot,3,3)
+    # angles = np.random.uniform(0,2*np.pi,size=(nrot,3))
+    # M = R.from_euler('zyx', angles, degrees=False).as_matrix() # (nrot,3,3)
+    M = R.random(nrot).as_matrix()  # (nrot,3,3)
 
     rotated_coordinates = np.einsum('rij,nj->rni', M, coords)
     return rotated_coordinates[0] if n_rotations is None else rotated_coordinates
