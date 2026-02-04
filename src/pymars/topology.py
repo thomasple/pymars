@@ -14,7 +14,7 @@ import numpy as np
 import numba
 
 from .periodic_table import COV_RADII, UFF_MAX_COORDINATION
-from .units import AtomicUnits
+from .atomic_units import au
 
 @numba.njit
 def _detect_bonds_pbc(radii, coordinates, cell):
@@ -62,7 +62,7 @@ def detect_topology(species: np.ndarray, coordinates: np.ndarray, cell: Optional
     coordinates : (N,3) array in Angstrom
     cell : optional 3x3 array in Angstrom (for PBC)
     """
-    radii = (COV_RADII * AtomicUnits.ANG)[species]
+    radii = (COV_RADII * au.ANG)[species]
     max_coord = UFF_MAX_COORDINATION[species]
 
     if cell is not None:
@@ -93,21 +93,21 @@ def detect_topology(species: np.ndarray, coordinates: np.ndarray, cell: Optional
     bonds = bonds[sorted_indices, :]
     distances = distances[sorted_indices]
 
-    true_bonds: List[Tuple[int, int]] = []
+    true_bonds_list: List[Tuple[int, int]] = []
     for ibond in range(bonds.shape[0]):
         i, j = bonds[ibond]
         ci, cj = coord[i], coord[j]
         mci, mcj = max_coord[i], max_coord[j]
         if ci <= mci and cj <= mcj:
-            true_bonds.append((i, j))
+            true_bonds_list.append((i, j))
         else:
             coord[i] -= 1
             coord[j] -= 1
 
-    if len(true_bonds) == 0:
+    if len(true_bonds_list) == 0:
         return np.zeros((0, 2), dtype=np.int32)
 
-    true_bonds = np.array(true_bonds, dtype=np.int32)
+    true_bonds = np.array(true_bonds_list, dtype=np.int32)
     sorted_indices = np.lexsort((true_bonds[:, 1], true_bonds[:, 0]))
     true_bonds = true_bonds[sorted_indices, :]
 
