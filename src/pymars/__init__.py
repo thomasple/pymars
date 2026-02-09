@@ -63,15 +63,30 @@ def main() -> None:
     masses = system["masses"]
     batch_size = system["batch_size"]
 
-    simulation_time = simulation_parameters["simulation_time"]  # ps
+    # Extract nested parameters or use legacy flat format
+    general_params = simulation_parameters.get("general_parameters", simulation_parameters)
+    dynamic_params = simulation_parameters.get("dynamic_parameters", simulation_parameters)
+    output_params = simulation_parameters.get("output_details", simulation_parameters)
+    
+    # Get simulation time parameters
     dt = system["dt"]  # ps
-    n_steps = round(simulation_time / dt)
-    simulation_time = n_steps * dt  # adjust to exact number of steps
+    if "step_dyn" in dynamic_params:
+        n_steps = int(dynamic_params["step_dyn"])
+        simulation_time = n_steps * dt
+    elif "simulation_time" in simulation_parameters:
+        simulation_time = simulation_parameters["simulation_time"]  # ps
+        n_steps = round(simulation_time / dt)
+        simulation_time = n_steps * dt  # adjust to exact number of steps
+    else:
+        raise ValueError("Either step_dyn or simulation_time must be specified")
+    
     print(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt} ps)")
 
-    print_step = simulation_parameters.get("print_step", 100)
-
-    traj_file = str(simulation_parameters.get("traj_file", "trajectory.xyz"))
+    # Get output parameters
+    save_steps = general_params.get("save_steps", general_params.get("print_step", 100))
+    save_energy = general_params.get("save_energy", general_params.get("energy_steps", 100))
+    
+    traj_file = str(output_params.get("trajectory_file", output_params.get("traj_file", "trajectory.xyz")))
     write_traj = traj_file.lower() != "none"
     if write_traj:
         assert traj_file.endswith(".xyz"), "Only .xyz output format is supported currently."
@@ -81,6 +96,17 @@ def main() -> None:
         else:
             num=len(str(batch_size-1))
             ftraj = [open(traj_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
+    
+    # Get energy output file
+    energy_file = output_params.get("energies_file", output_params.get("energy_output_file", None))
+    if energy_file:
+        if isinstance(energy_file, str):
+            if batch_size == 1:
+                energy_files = [energy_file]
+            else:
+                energy_files = [energy_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
+        else:
+            energy_files = energy_file
 
     @jax.jit
     def mean_energies_and_remove_com(coordinates, velocities,epots):
@@ -98,12 +124,15 @@ def main() -> None:
     print(f"#{'Step':>10} {'Time':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
     for istep in range(n_steps):
         coordinates, velocities, accelerations, energies = integrate(
-            coordinates, velocities, accelerations
+            coordinates, velocities, accelerations,
+            step=istep,
+            energy_output_file=energy_files if energy_file else None,
+            energy_steps=save_energy
         )
-        if (istep + 1) % print_step == 0:
+        if (istep + 1) % save_steps == 0:
             time_elapsed = time.time() - time0
             time0 = time.time()
-            time_per_step = time_elapsed / print_step
+            time_per_step = time_elapsed / save_steps
             step_per_day = 60*60*24 / time_per_step
             ns_per_step = dt*us.NS
             ns_per_day = ns_per_step * step_per_day

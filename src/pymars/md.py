@@ -20,9 +20,47 @@ import jax
 
 
 def initialize_collision_simulation(simulation_parameters, verbose=True):
+    """
+    Initialize collision (or molecule-only) simulation.
+
+    Returns a dict with:
+      - species, masses (numpy), coordinates (jnp), velocities (jnp), accelerations (jnp)
+      - total_energies_and_forces callable
+      - integrate(...) function to run dynamics
+      - batch_size, dt
+    """
+
+    # Extract nested parameter sections
+    input_params = simulation_parameters.get("input_parameters", {})
+    general_params = simulation_parameters.get("general_parameters", {})
+    projectile_params = simulation_parameters.get("projectile_parameters", {})
+    calculation_params = simulation_parameters.get("calculation_parameters", {})
+    dynamic_params = simulation_parameters.get("dynamic_parameters", {})
+    
+    # Support both nested and flat (legacy) formats
+    # If nested sections don't exist, fall back to top-level keys
+    if not input_params and not general_params:
+        # Legacy flat format - use simulation_parameters directly
+        input_params = simulation_parameters
+        general_params = simulation_parameters
+        projectile_params = simulation_parameters
+        calculation_params = simulation_parameters
+        dynamic_params = simulation_parameters
+    
+    # Determine if this is collision dynamics or molecule-only
+    # Check projectile_flag in nested format, or collision_dynamics in flat format
+    if "projectile_flag" in projectile_params:
+        collision = bool(projectile_params.get("projectile_flag", True))
+    else:
+        # Fall back to collision_dynamics (legacy)
+        coll_dyn = simulation_parameters.get("collision_dynamics", True)
+        if isinstance(coll_dyn, str):
+            collision = coll_dyn.strip().upper() in ("TRUE", "YES", "1")
+        else:
+            collision = bool(coll_dyn)
 
     # load initial configuration
-    geometry = simulation_parameters["initial_geometry"]
+    geometry = input_params.get("initial_geometry", simulation_parameters.get("initial_geometry"))
     if isinstance(geometry, str):
         assert Path(geometry).is_file(), f"File {geometry} does not exist."
         # load from file
@@ -34,7 +72,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     else:
         raise ValueError("initial_geometry must be a file path or a dictionary")
 
-    total_charge = round(simulation_parameters.get("total_charge", 0))
+    total_charge = round(input_params.get("total_charge", 0))
     if verbose:
         print(f"# total charge of the system: {total_charge} e")
 
@@ -43,11 +81,11 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         print("# Initial configuration loaded: ", composition_str)
 
     # batch size for parallel simulations
-    batch_size = simulation_parameters.get("batch_size", 1)
+    batch_size = general_params.get("batch_size", 1)
     assert batch_size >= 1, "batch_size must be at least 1"
 
     # random rotation
-    do_random_rotation = simulation_parameters.get("random_rotation", True)
+    do_random_rotation = input_params.get("random_rotation", True)
     if do_random_rotation:
         coordinates = apply_random_rotation(coordinates, n_rotations=batch_size)
         if verbose:
@@ -58,7 +96,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     batch_species = np.tile(species, batch_size)  # (batch_size*N)
 
     # sample velocities from Maxwell-Boltzmann distribution
-    temperature = simulation_parameters.get("temperature", 0.0)  # Kelvin
+    temperature = general_params.get("temperature", 0.0)  # Kelvin
     assert temperature >= 0.0, "Temperature must be non-negative"
     velocities = sample_velocities(batch_species, temperature).reshape(
         batch_size, -1, 3
@@ -75,42 +113,39 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     # coordinates bounding box
     molecule_radius = np.max(np.linalg.norm(coordinates, axis=-1))  # angstrom
 
-    # initialize projectiles
-    projectile_species = simulation_parameters.get(
-        "projectile_species", 18
-    )  # default Argon
-    max_impact_parameter = simulation_parameters.get(
-        "max_impact_parameter", 0.5
-    )  # angstrom
-    projectile_distance = simulation_parameters.get(
-        "projectile_distance", 10.0 + 2 * molecule_radius
-    )  # angstrom
-    assert (
-        projectile_distance > 2 * molecule_radius
-    ), f"projectile_distance must be larger than twice molecule radius ({2*molecule_radius:.2f} A)"
+    if collision:
+        # initialize projectiles
+        projectile_species = int(projectile_params.get("projectile_species", 18))  # default Argon
+        max_impact_parameter = float(projectile_params.get("max_impact_parameter", 0.5))  # angstrom
+        projectile_distance = float(projectile_params.get(
+            "projectile_distance", 10.0 + 2 * molecule_radius
+        ))  # angstrom
+        assert (
+            projectile_distance > 2 * molecule_radius
+        ), f"projectile_distance must be larger than twice molecule radius ({2*molecule_radius:.2f} A)"
 
-    projectile_temperature = simulation_parameters.get(
-        "projectile_temperature", temperature
-    )  # Kelvin
-    assert projectile_temperature > 0.0, "projectile_temperature must > 0 K"
-    projectile_coordinates, projectiles_velocities = sample_projectiles(
-        batch_size,
-        temperature=projectile_temperature,
-        distance=projectile_distance,
-        projectile_species=projectile_species,
-        max_impact_parameter=max_impact_parameter,
-    )
-
-    if verbose:
-        projectile_vel = np.linalg.norm(projectiles_velocities[0])
-        distance_to_impact = projectile_distance - molecule_radius
-        time_to_impact = us.PS * distance_to_impact / projectile_vel
-        print(
-            f"# initialized projectile at distance {projectile_distance:.2f} A with temperature {projectile_temperature} K"
+        projectile_temperature = float(projectile_params.get(
+            "projectile_temperature", temperature
+        ))  # Kelvin
+        assert projectile_temperature > 0.0, "projectile_temperature must > 0 K"
+        projectile_coordinates, projectiles_velocities = sample_projectiles(
+            batch_size,
+            temperature=projectile_temperature,
+            distance=projectile_distance,
+            projectile_species=projectile_species,
+            max_impact_parameter=max_impact_parameter,
         )
-        print(f"# Time before collision: ~{time_to_impact:.2f} ps")
 
-    model_file = simulation_parameters["model"]
+        if verbose:
+            projectile_vel = np.linalg.norm(projectiles_velocities[0])
+            distance_to_impact = projectile_distance - molecule_radius
+            time_to_impact = us.PS * distance_to_impact / projectile_vel
+            print(
+                f"# initialized projectile at distance {projectile_distance:.2f} A with temperature {projectile_temperature} K"
+            )
+            print(f"# Time before collision: ~{time_to_impact:.2f} ps")
+
+    model_file = calculation_params.get("model", simulation_parameters.get("model"))
     assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
     print(f"# Using FENNIX model from file: {model_file}")
     from fennol import FENNIX
@@ -123,48 +158,64 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         species, coordinates, total_charge=total_charge
     )
 
-
-    repulsion_energies_and_forces = setup_repulsion_potential(
-        species, projectile_species, use_jax=True
-    )
-
-    def total_energies_and_forces(full_coordinates,conformation):
-        coordinates = full_coordinates[:, 1:, :]
-        projectile_coordinates = full_coordinates[:, 0, :]
-        # energies_model, forces_model = model_energies_and_forces(coordinates)
-        energies_model, forces_model, _ = model._energy_and_forces(model.variables, conformation)
-        energies_repulsion, forces_repulsion, projectile_forces = (
-            repulsion_energies_and_forces(coordinates, projectile_coordinates)
+    if collision:
+        repulsion_energies_and_forces = setup_repulsion_potential(
+            species, projectile_species, use_jax=True
         )
-        total_energies = energies_model*energy_conv + energies_repulsion
-        total_forces = forces_model.reshape(batch_size,-1,3)*energy_conv + forces_repulsion
 
-        full_forces = jnp.concatenate(
-            [projectile_forces[:, None, :], total_forces], axis=1
+        def total_energies_and_forces(full_coordinates, conformation):
+            # full_coordinates expected shape (batch_size, N+1, 3) as jnp array
+            coordinates_model = full_coordinates[:, 1:, :]
+            projectile_coordinates = full_coordinates[:, 0, :]
+            energies_model, forces_model, _ = model._energy_and_forces(model.variables, conformation)
+            energies_repulsion, forces_repulsion, projectile_forces = (
+                repulsion_energies_and_forces(coordinates_model, projectile_coordinates)
+            )
+            total_energies = energies_model * energy_conv + energies_repulsion
+            total_forces = forces_model.reshape(coordinates_model.shape[0], -1, 3) * energy_conv + forces_repulsion
+
+            full_forces = jnp.concatenate(
+                [projectile_forces[:, None, :], total_forces], axis=1
+            )  # (batch_size,N+1,3)
+            return total_energies, full_forces
+
+        full_species = np.concatenate(
+            [np.array([projectile_species], dtype=np.int32), species]
+        )  # (N+1,)
+        full_coordinates = np.concatenate(
+            [projectile_coordinates[:, None, :], coordinates], axis=1
         )  # (batch_size,N+1,3)
-        return total_energies, full_forces
+        full_velocities = np.concatenate(
+            [projectiles_velocities[:, None, :], velocities], axis=1
+        )  # (batch_size,N+1,3)
 
-    full_species = np.concatenate(
-        [np.array([projectile_species], dtype=np.int32), species]
-    )  # (N+1,)
-    full_coordinates = np.concatenate(
-        [projectile_coordinates[:, None, :], coordinates], axis=1
-    )  # (batch_size,N+1,3)
-    full_velocities = np.concatenate(
-        [projectiles_velocities[:, None, :], velocities], axis=1
-    )  # (batch_size,N+1,3)
+    else:
+        def total_energies_and_forces(full_coordinates, conformation):
+            # full_coordinates shape (batch_size, N, 3)
+            coordinates_model = full_coordinates[:, :, :]
+            energies_model, forces_model, _ = model._energy_and_forces(model.variables, conformation)
+            total_energies = energies_model * energy_conv
+            total_forces = forces_model.reshape(coordinates_model.shape[0], -1, 3) * energy_conv
+            full_forces = total_forces  # (batch_size,N,3)
+            return total_energies, full_forces
+
+        full_species = species.copy()  # (N,)
+        full_coordinates = coordinates.copy()  # (batch_size,N,3)
+        full_velocities = velocities.copy()  # (batch_size,N,3)
 
     # compute initial accelerations
-    masses = (
-        ATOMIC_MASSES[full_species].astype(np.float32)[None, :, None] / us.DA
-    )  # (N,)
+    masses_np = ATOMIC_MASSES[full_species].astype(np.float32) / us.DA  # (N,) in atomic units
+    masses = jnp.array(masses_np)[None, :, None]  # (1,N,1) for broadcasting in jax
 
-    conformation = model.preprocess(use_gpu=True,**initial_conformation)
-    energies, forces = total_energies_and_forces(full_coordinates,conformation)
-    accelerations = forces / masses  # (batch_size,N,3)
+    # Preprocess initial conformation for the model
+    conformation = model.preprocess(use_gpu=True, **initial_conformation)
+    # Ensure full_coordinates passed as jnp arrays to energy/force function
+    full_coordinates_jnp = jnp.array(full_coordinates, dtype=jnp.float32)
+    energies, forces = total_energies_and_forces(full_coordinates_jnp, conformation)
+    accelerations = forces / masses  # (batch_size, N(+1), 3) depending on collision
 
     # prepare integrator
-    dt = simulation_parameters.get("dt", 1.0 / us.FS)
+    dt = dynamic_params.get("dt_dyn", dynamic_params.get("dt", 1.0 / us.FS))
     dt2 = dt * 0.5
 
     @jax.jit
@@ -182,29 +233,79 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         velocities = velocities + accelerations * dt2  # (batch_size,N,3)
         return velocities, accelerations, energies
 
-    def integrate(initial_coordinates, initial_velocities, accelerations):
+    def integrate(initial_coordinates, initial_velocities, accelerations, step=0, energy_output_file=None, energy_steps=100):
         # Velocity Verlet step
         coordinates, velocities = integrate_part1(
             initial_coordinates, initial_velocities, accelerations
         )
         
+        # Update conformation for model preprocessing
+        if collision:
+            # For collision dynamics, exclude projectile (index 0)
+            coords_for_model = coordinates[:,1:,:]
+        else:
+            # For non-collision dynamics, use all coordinates
+            coords_for_model = coordinates
+            
         conformation = model.preprocess(use_gpu=True,**update_conformation(
-            initial_conformation, coordinates[:,1:,:]))
+            initial_conformation, coords_for_model))
 
         velocities, accelerations, energies = integrate_part2(
             coordinates, velocities,conformation
         )
 
+        # Write energy output if requested
+        if energy_output_file is not None and step % energy_steps == 0:
+            write_energy_output(
+                energy_output_file, step, velocities, masses, energies, dt
+            )
+
         return coordinates, velocities, accelerations, energies
+
+    def write_energy_output(output_file, step, velocities, masses, potential_energies, dt):
+        """Write energy data to output file in FeNNol format."""
+        # Compute kinetic energy: 0.5 * m * v^2
+        kinetic_energies = 0.5 * jnp.sum(masses[None, :, None] * velocities**2, axis=(1, 2))
+        
+        # Total energy
+        total_energies = potential_energies + kinetic_energies
+        
+        # Temperature: T = (2 * Ekin) / (3 * N * k_B)
+        # k_B in kcal/(mol*K)
+        k_B = 0.0019872043  # kcal/(mol*K)
+        N_atoms = velocities.shape[1]
+        temperatures = (2.0 * kinetic_energies) / (3.0 * N_atoms * k_B)
+        
+        # Time in femtoseconds
+        time_fs = step * dt * us.FS
+        
+        # Write to file for each trajectory in batch
+        for b in range(batch_size):
+            if isinstance(output_file, list):
+                file_path = output_file[b]
+            else:
+                file_path = output_file if batch_size == 1 else f"{output_file}_{b}"
+            
+            # Create file with header if step == 0
+            if step == 0:
+                with open(file_path, 'w') as f:
+                    f.write(f"{'Step':>8s} {'Time[fs]':>12s} {'Etot':>12s} {'Epot':>12s} {'Ekin':>12s} {'Temp[K]':>10s}\n")
+            
+            # Append energy data
+            with open(file_path, 'a') as f:
+                f.write(f"{step:8d} {time_fs:12.4f} {float(total_energies[b]):12.6f} "
+                       f"{float(potential_energies[b]):12.6f} {float(kinetic_energies[b]):12.6f} "
+                       f"{float(temperatures[b]):10.2f}\n")
 
     return {
         "species": full_species,
-        "masses": masses.reshape(-1),
-        "coordinates": jnp.array(full_coordinates,dtype=jnp.float32),
+        "masses": masses_np,
+        "coordinates": full_coordinates_jnp,
         "velocities": jnp.array(full_velocities,dtype=jnp.float32),
-        "accelerations": jnp.array(accelerations,dtype=jnp.float32),
+        "accelerations": accelerations,
         "total_energies_and_forces": total_energies_and_forces,
         "integrate": integrate,
         "batch_size": batch_size,
         "dt": dt,
+        "initial_energies": energies,
     }
