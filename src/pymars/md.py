@@ -145,11 +145,52 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             )
             print(f"# Time before collision: ~{time_to_impact:.2f} ps")
 
-    model_file = calculation_params.get("model", simulation_parameters.get("model"))
-    assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
+    # Support both "model" and "model_file" keys for backward compatibility
+    # Try nested config first (calculation_parameters), then fall back to flat config
+    model_file = calculation_params.get("model") or calculation_params.get("model_file")
+    if model_file is None:
+        model_file = simulation_parameters.get("model") or simulation_parameters.get("model_file")
+    if model_file is None:
+        raise ValueError("Configuration must contain either 'model_file' or 'model' key")
+    
+    model_path = Path(model_file)
+    assert model_path.is_file(), f"Model file {model_file} does not exist."
     print(f"# Using FENNIX model from file: {model_file}")
+    
+    # Add model directory to sys.path so fennol can find auxiliary files (e.g., custom architecture definitions)
+    import sys
+    import importlib.util
+    model_dir = str(model_path.parent.resolve())
+    if model_dir not in sys.path:
+        sys.path.insert(0, model_dir)
+    
+    # Import any Python modules in the model directory to register custom architectures
+    import glob
+    from fennol.models.fennix import MODULES
+    for py_file in glob.glob(str(Path(model_dir) / "*.py")):
+        if not py_file.endswith("__init__.py"):
+            module_name = Path(py_file).stem
+            try:
+                spec = importlib.util.spec_from_file_location(module_name, py_file)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    # Register any classes with FID attribute as custom modules
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        if hasattr(attr, '__mro__') and hasattr(attr, '__doc__'):
+                            if attr.__doc__ and 'FID :' in attr.__doc__:
+                                # Extract FID from docstring
+                                for line in attr.__doc__.split('\n'):
+                                    if 'FID :' in line:
+                                        fid = line.split('FID :')[1].strip()
+                                        MODULES[fid.upper()] = attr
+                                        print(f"# Registered custom module: {fid}")
+                                        break
+            except Exception as e:
+                print(f"# Warning: Could not import {module_name}: {e}")
+    
     from fennol import FENNIX
-
     model = FENNIX.load(model_file)
     model.preproc_state = model.preproc_state.copy({"check_input": False})
     energy_conv = 1.0 / us.get_multiplier(model.energy_unit)
