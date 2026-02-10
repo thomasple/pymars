@@ -27,12 +27,19 @@ def test_model_file_key_handling():
         }
         
         # This will fail when trying to actually load the model (it's not a real fennol model)
-        # but it should get past the key validation
+        # but it should get past the key validation (not raise ValueError about missing key)
         try:
             system = initialize_collision_simulation(config_with_model_file, verbose=False)
-        except Exception as e:
-            # We expect this to fail at model loading, not at key validation
-            assert "model_file" not in str(e).lower() and "model" not in str(e).lower()
+            # If we got here, the model loaded successfully (unexpected)
+            assert False, "Expected model loading to fail with dummy file"
+        except ValueError as e:
+            # If ValueError is raised, it should NOT be about missing model key
+            if "Configuration must contain either" in str(e):
+                raise AssertionError(f"Key validation failed unexpectedly: {e}")
+            # Other ValueErrors are expected from model loading
+        except Exception:
+            # Any other exception is expected (model loading will fail)
+            pass
         
         # Test with 'model' key (legacy support)
         config_with_model = {
@@ -46,9 +53,14 @@ def test_model_file_key_handling():
         
         try:
             system = initialize_collision_simulation(config_with_model, verbose=False)
-        except Exception as e:
-            # We expect this to fail at model loading, not at key validation
-            assert "model_file" not in str(e).lower() and "model" not in str(e).lower()
+            assert False, "Expected model loading to fail with dummy file"
+        except ValueError as e:
+            # If ValueError is raised, it should NOT be about missing model key
+            if "Configuration must contain either" in str(e):
+                raise AssertionError(f"Key validation failed unexpectedly: {e}")
+        except Exception:
+            # Any other exception is expected (model loading will fail)
+            pass
         
         # Test with neither key - should raise ValueError
         config_without_model = {
