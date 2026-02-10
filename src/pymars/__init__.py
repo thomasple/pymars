@@ -62,6 +62,10 @@ def main() -> None:
     species = system["species"]
     masses = system["masses"]
     batch_size = system["batch_size"]
+    
+    # Convert atomic numbers to element symbols for trajectory output
+    from ase.data import chemical_symbols
+    element_symbols = [chemical_symbols[z] for z in species]
 
     simulation_time = simulation_parameters["simulation_time"]  # ps
     dt = system["dt"]  # ps
@@ -120,7 +124,7 @@ def main() -> None:
                 for i in range(batch_size):
                     write_xyz_frame(
                         ftraj[i],
-                        species,
+                        element_symbols,
                         coords[i],
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
