@@ -308,6 +308,10 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         # Compute kinetic energy: 0.5 * m * v^2
         kinetic_energies = 0.5 * jnp.sum(masses[None, :, None] * velocities**2, axis=(1, 2))
         
+        # Ensure potential energies are 1D (batch_size,)
+        potential_energies = jnp.squeeze(potential_energies)
+        kinetic_energies = jnp.squeeze(kinetic_energies)
+        
         # Total energy
         total_energies = potential_energies + kinetic_energies
         
@@ -319,6 +323,19 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         
         # Time in femtoseconds
         time_fs = step * dt * us.FS
+        
+        # Convert JAX arrays to numpy for file writing
+        total_energies_np = np.array(total_energies)
+        potential_energies_np = np.array(potential_energies)
+        kinetic_energies_np = np.array(kinetic_energies)
+        temperatures_np = np.array(temperatures)
+        
+        # Reshape to 1D if needed (handle scalar case for batch_size=1)
+        if total_energies_np.ndim == 0:
+            total_energies_np = np.array([total_energies_np])
+            potential_energies_np = np.array([potential_energies_np])
+            kinetic_energies_np = np.array([kinetic_energies_np])
+            temperatures_np = np.array([temperatures_np])
         
         # Write to file for each trajectory in batch
         for b in range(batch_size):
@@ -334,9 +351,15 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             
             # Append energy data
             with open(file_path, 'a') as f:
-                f.write(f"{step:8d} {time_fs:12.4f} {float(total_energies[b]):12.6f} "
-                       f"{float(potential_energies[b]):12.6f} {float(kinetic_energies[b]):12.6f} "
-                       f"{float(temperatures[b]):10.2f}\n")
+                # Extract scalar values properly
+                total_e = float(total_energies_np.flat[b] if total_energies_np.size > 1 else total_energies_np)
+                pot_e = float(potential_energies_np.flat[b] if potential_energies_np.size > 1 else potential_energies_np)
+                kin_e = float(kinetic_energies_np.flat[b] if kinetic_energies_np.size > 1 else kinetic_energies_np)
+                temp = float(temperatures_np.flat[b] if temperatures_np.size > 1 else temperatures_np)
+                
+                f.write(f"{step:8d} {time_fs:12.4f} {total_e:12.6f} "
+                       f"{pot_e:12.6f} {kin_e:12.6f} "
+                       f"{temp:10.2f}\n")
 
     return {
         "species": full_species,

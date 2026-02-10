@@ -13,7 +13,7 @@ def test_nested_config_structure(test_data_dir, tmp_path):
     # Create nested configuration
     config = {
         "calculation_parameters": {
-            "model": str(test_data_dir / "mock_model.pt"),
+            "model": str(test_data_dir / "mock_model.fnx"),
         },
         "input_parameters": {
             "initial_geometry": str(test_data_dir / "aspirin.xyz"),
@@ -78,7 +78,7 @@ def test_legacy_flat_config_backwards_compatibility(test_data_dir):
     # Old flat configuration style
     config = {
         "initial_geometry": str(test_data_dir / "aspirin.xyz"),
-        "model": str(test_data_dir / "mock_model.pt"),
+        "model": str(test_data_dir / "mock_model.fnx"),
         "total_charge": 0,
         "batch_size": 1,
         "random_rotation": False,
@@ -108,7 +108,7 @@ def test_no_projectile_mode(test_data_dir):
     # Configuration with projectile disabled
     config = {
         "calculation_parameters": {
-            "model": str(test_data_dir / "mock_model.pt"),
+            "model": str(test_data_dir / "mock_model.fnx"),
         },
         "input_parameters": {
             "initial_geometry": str(test_data_dir / "aspirin.xyz"),
@@ -148,7 +148,7 @@ def test_no_projectile_legacy_format(test_data_dir):
     
     config = {
         "initial_geometry": str(test_data_dir / "aspirin.xyz"),
-        "model": str(test_data_dir / "mock_model.pt"),
+        "model": str(test_data_dir / "mock_model.fnx"),
         "collision_dynamics": False,  # Legacy parameter
         "total_charge": 0,
         "batch_size": 1,
@@ -174,7 +174,7 @@ def test_batch_size_multiple_trajectories(test_data_dir):
     batch_size = 3
     config = {
         "calculation_parameters": {
-            "model": str(test_data_dir / "mock_model.pt"),
+            "model": str(test_data_dir / "mock_model.fnx"),
         },
         "input_parameters": {
             "initial_geometry": str(test_data_dir / "aspirin.xyz"),
@@ -214,7 +214,7 @@ def test_parameter_fallbacks(test_data_dir):
     # Mix of old and new parameter names
     config = {
         "calculation_parameters": {
-            "model": str(test_data_dir / "mock_model.pt"),
+            "model": str(test_data_dir / "mock_model.fnx"),
         },
         "input_parameters": {
             "initial_geometry": str(test_data_dir / "aspirin.xyz"),
@@ -243,7 +243,7 @@ def test_seed_parameter(test_data_dir):
     
     config = {
         "calculation_parameters": {
-            "model": str(test_data_dir / "mock_model.pt"),
+            "model": str(test_data_dir / "mock_model.fnx"),
         },
         "input_parameters": {
             "initial_geometry": str(test_data_dir / "aspirin.xyz"),
@@ -283,7 +283,7 @@ def test_thermostat_parameters_present(test_data_dir):
     
     config = {
         "calculation_parameters": {
-            "model": str(test_data_dir / "mock_model.pt"),
+            "model": str(test_data_dir / "mock_model.fnx"),
         },
         "input_parameters": {
             "initial_geometry": str(test_data_dir / "aspirin.xyz"),

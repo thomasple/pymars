@@ -21,7 +21,7 @@ projectile_distance: 20.0  # angstrom
 max_impact_parameter: 0.5  # angstrom
 
 # Force field model
-model: "path/to/fennix/model.pt"
+model: "path/to/fennix/model.fnx"
 
 # Integration parameters
 dt: 1.0  # timestep in femtoseconds (fs)

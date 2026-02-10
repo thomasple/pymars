@@ -2,7 +2,7 @@
 # Structured format similar to NML input files
 
 calculation_parameters:
-  model: "path/to/fennix_model.pt"  # Path to FENNIX model file
+  model: "path/to/fennix_model.fnx"  # Path to FENNIX model file
 
 general_parameters:
   temperature: 300.0  # Temperature in Kelvin

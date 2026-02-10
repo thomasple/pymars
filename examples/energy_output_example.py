@@ -10,7 +10,7 @@ from pymars.md import initialize_collision_simulation
 # Simulation parameters using nested structure
 simulation_parameters = {
     "calculation_parameters": {
-        "model": "path/to/fennix/model.pt",  # Update with actual model path
+        "model": "path/to/fennix/model.fnx",  # Update with actual model path
     },
     "input_parameters": {
         "initial_geometry": "tests/aspirin.xyz",
