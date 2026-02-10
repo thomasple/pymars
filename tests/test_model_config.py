@@ -11,7 +11,8 @@ def test_model_file_key_handling():
     # Create a temporary model file (just for path validation test)
     with tempfile.NamedTemporaryFile(mode='w', suffix='.pkl', delete=False) as f:
         temp_model_path = f.name
-        f.write("dummy")  # Write something so it's a valid file
+        # Write dummy content (not valid pickle) to test path handling
+        f.write("dummy")
     
     try:
         test_data_dir = Path(__file__).parent
@@ -127,9 +128,13 @@ def test_model_directory_added_to_syspath():
             # Verify that model directory was added to sys.path
             assert model_dir_str in sys.path, f"Model directory {model_dir_str} should be in sys.path"
             
-            # Verify we can import the auxiliary file
-            import custom_module
-            assert custom_module.TEST_VARIABLE == 'model_dir_in_path'
+            # Verify we can import the auxiliary file using dynamic import
+            import importlib
+            try:
+                custom_module = importlib.import_module('custom_module')
+                assert custom_module.TEST_VARIABLE == 'model_dir_in_path'
+            except ImportError as e:
+                raise AssertionError(f"Failed to import custom_module from model directory: {e}")
             
         finally:
             # Clean up sys.modules and sys.path
