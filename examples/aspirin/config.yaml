@@ -1,0 +1,20 @@
+# PyMARS Topology - Basic Collision Simulation (No Fragmentation Check)
+# This runs a standard collision simulation without fragmentation monitoring
+
+initial_geometry: tests/aspirin.xyz   # path to an XYZ file or a dict with species/coordinates
+model: /home_lct/lbertagn/FeNNol/fennix-bio1L-lr-omolBio.fnx     # file understood by fennol.FENNIX.load
+simulation_time[ps]: 10.0              # total simulation time (ps)
+dt[fs]: 1.                             # timestep  1 fs
+batch_size: 1
+temperature: 300.0
+random_rotation: true
+collision_dynamics: true
+projectile_species: 18                 # Argon
+projectile_temperature: 3000.0         # K
+projectile_distance: 30.0              # angstrom
+max_impact_parameter: 1.0              # angstrom
+output_file: trajectory.xyz
+print_step: 100
+
+# Fragmentation check disabled - runs for full simulation_time
+fragmentation_check: false

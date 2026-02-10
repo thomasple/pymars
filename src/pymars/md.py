@@ -18,7 +18,7 @@ from pathlib import Path
 import jax.numpy as jnp
 import jax
 
-from .topology import count_graphs
+from .topology import count_graphs, get_fragment_separation
 
 
 def initialize_collision_simulation(simulation_parameters, verbose=True):
@@ -210,17 +210,24 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         return velocities, accelerations, energies
     
     def integrate(initial_coordinates, initial_velocities, accelerations,
-                  nsteps=10000, topology_check=True, cell=None, verbose=True):
+                  nsteps=10000, fragmentation_check=False, distance_threshold=10.0, 
+                  cell=None, verbose=True):
         """
         Run dynamics for up to `nsteps` steps using the Velocity Verlet integrator.
     
-        Behavior for topology_check with batch_size > 1:
+        Args:
+            fragmentation_check: If True, monitor fragmentation and stop when fragments separate
+            distance_threshold: Minimum COM distance (Angstrom) between fragments to consider "separated"
+            cell: Optional 3x3 array for PBC in topology detection
+            verbose: Print progress information
+    
+        Behavior for fragmentation_check with batch_size > 1:
           - The integrator runs all batch members in parallel.
           - We monitor topology per-batch (ignoring projectile index when collision=True).
           - For each batch member we record its starting number of graphs N and set a
             target of N+1. A batch member is considered "split" when its graph count
-            reaches >= N+1.
-          - The integration continues until all batch members have reached their own N+1
+            reaches >= N+1 AND the fragments are separated by >= distance_threshold.
+          - The integration continues until all batch members have fragmented and separated
             or until nsteps is reached.
         """
         coords = initial_coordinates  # jnp array (batch_size, N(+1), 3) or (batch_size, N, 3)
@@ -258,9 +265,10 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         if verbose:
             print(f"# initial graph counts per batch: {initial_graphs.tolist()}")
             print(f"# target graph counts per batch (N+1): {target_graphs.tolist()}")
-            print(f"# running up to {nsteps} steps; topology_check={topology_check}")
+            print(f"# running up to {nsteps} steps; fragmentation_check={fragmentation_check}, distance_threshold={distance_threshold} A")
     
         final_energies = None
+        fragment_distances = -np.ones(bs, dtype=float)  # Track fragment separations
     
         for step in range(nsteps):
             # integrate one step for all batch members (JAX jitted)
@@ -273,7 +281,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             vels, accs, energies = integrate_part2(coords, vels, conformation)
             final_energies = energies
     
-            if topology_check:
+            if fragmentation_check:
                 coords_host = jax.device_get(coords)  # move to host for topology detection
                 for b in range(bs):
                     if not active[b]:
@@ -281,19 +289,34 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                     if collision:
                         mol_coords = coords_host[b, 1:, :]
                         species_mol = full_species[1:]
+                        masses_mol = masses_np[1:]
                     else:
                         mol_coords = coords_host[b, :, :]
                         species_mol = full_species
+                        masses_mol = masses_np
+                    
                     ngraphs = count_graphs(species_mol, mol_coords, cell)
-                    # mark as split when graph count reaches >= initial + 1
+                    
+                    # Check if fragmented
                     if ngraphs >= target_graphs[b]:
-                        active[b] = False
-                        split_steps[b] = step
-                        if verbose:
-                            print(f"# batch {b} reached target graphs at step {step} (initial {initial_graphs[b]} -> now {ngraphs})")
+                        # Compute fragment separation distance
+                        frag_dist = get_fragment_separation(species_mol, mol_coords, masses_mol, cell)
+                        fragment_distances[b] = frag_dist
+                        
+                        # Mark as split when fragments are separated beyond threshold
+                        if frag_dist >= distance_threshold:
+                            active[b] = False
+                            split_steps[b] = step
+                            if verbose:
+                                print(f"# batch {b} fragmented and separated at step {step} "
+                                      f"(initial {initial_graphs[b]} -> now {ngraphs} graphs, "
+                                      f"fragment distance: {frag_dist:.2f} A >= {distance_threshold} A)")
+                        elif verbose and step % max(1, nsteps // 20) == 0:
+                            print(f"# batch {b} fragmented but not yet separated "
+                                  f"({ngraphs} graphs, fragment distance: {frag_dist:.2f} A < {distance_threshold} A)")
     
-            # stop when all batch members have reached their N+1 target
-            if topology_check and not active.any():
+            # stop when all batch members have fragmented and separated
+            if fragmentation_check and not active.any():
                 if verbose:
                     print(f"# all batch members reached their N+1 target by step {step}. Stopping integration.")
                 break
@@ -309,7 +332,8 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             "velocities": vels,
             "accelerations": accs,
             "energies": final_energies,
-            "split_steps": split_steps,  # -2: already >= target at start, -1: never reached target, >=0: step when reached N+1
+            "split_steps": split_steps,  # -2: already >= target at start, -1: never reached target, >=0: step when fragmented and separated
+            "fragment_distances": fragment_distances,  # -1: not fragmented, >=0: minimum COM distance between fragments (A)
             "all_reached_target": np.all(split_steps != -1),
             "initial_graphs": initial_graphs,
             "target_graphs": target_graphs,

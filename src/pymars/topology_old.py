@@ -7,7 +7,6 @@ Contains:
 - detect_topology : returns bonds array shape (nbonds,2)
 - count_graphs : returns number of connected components (graphs)
 - get_graph_components : return list of components (lists of atom indices)
-- get_fragment_separation : compute minimum COM distance between fragments
 """
 from typing import Optional, Tuple, List
 
@@ -181,55 +180,3 @@ def get_graph_components(species: np.ndarray, coordinates: np.ndarray, cell: Opt
         r = find(i)
         comps.setdefault(r, []).append(i)
     return [np.array(c, dtype=np.int32) for c in comps.values()]
-
-
-def get_fragment_separation(species: np.ndarray, coordinates: np.ndarray, 
-                            masses: Optional[np.ndarray] = None,
-                            cell: Optional[np.ndarray] = None) -> float:
-    """
-    Compute the minimum distance between fragment centers of mass.
-    
-    Args:
-        species: Array of atomic numbers
-        coordinates: (N,3) array of coordinates in Angstrom
-        masses: Optional array of masses. If None, uses atomic masses from periodic table
-        cell: Optional 3x3 array for PBC
-    
-    Returns:
-        float: Minimum COM distance between any two fragments (in Angstrom).
-               Returns 0.0 if only one fragment or no atoms.
-    """
-    components = get_graph_components(species, coordinates, cell)
-    
-    if len(components) <= 1:
-        return 0.0
-    
-    # Get masses for COM calculation
-    if masses is None:
-        from fennol.utils.periodic_table import ATOMIC_MASSES
-        masses = ATOMIC_MASSES[species].astype(np.float32)
-    
-    # Compute COM for each fragment
-    coms = []
-    for comp_indices in components:
-        comp_coords = coordinates[comp_indices]
-        comp_masses = masses[comp_indices]
-        total_mass = comp_masses.sum()
-        if total_mass > 0:
-            com = np.sum(comp_coords * comp_masses[:, None], axis=0) / total_mass
-        else:
-            com = np.mean(comp_coords, axis=0)
-        coms.append(com)
-    
-    # Find minimum distance between any two fragment COMs
-    coms = np.array(coms)
-    n_frags = len(coms)
-    min_dist = float('inf')
-    
-    for i in range(n_frags):
-        for j in range(i + 1, n_frags):
-            dist = np.linalg.norm(coms[i] - coms[j])
-            if dist < min_dist:
-                min_dist = dist
-    
-    return float(min_dist)

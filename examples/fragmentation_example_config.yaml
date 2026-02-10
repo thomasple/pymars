@@ -1,0 +1,49 @@
+# PyMARS Topology Branch - Fragmentation Check Example
+# This config demonstrates the fragmentation monitoring with distance threshold
+
+# Initial molecular geometry
+initial_geometry: tests/aspirin.xyz
+
+# Force field model
+model: /path/to/fennix_model.fnx
+
+# Simulation time parameters
+simulation_time[ps]: 10.0     # total simulation time (ps)
+dt[fs]: 1.0                   # timestep in femtoseconds
+
+# Parallel simulations
+batch_size: 5                 # Run 5 parallel collision trajectories
+
+# System properties
+temperature: 300.0            # Initial temperature (K)
+random_rotation: true         # Apply random rotation to each trajectory
+
+# Projectile/collision settings
+collision_dynamics: true      # Enable projectile collision
+projectile_species: 18        # Argon projectile
+projectile_temperature: 3000.0  # High energy projectile (K)
+projectile_distance: 30.0     # Initial distance (angstrom)
+max_impact_parameter: 1.0     # Random impact parameter up to 1 A
+
+# Output settings
+output_file: trajectory.xyz
+print_step: 100
+
+# Fragmentation monitoring (NEW FEATURE)
+fragmentation_check: true     # Enable fragmentation detection with distance threshold
+distance_threshold: 10.0      # Stop when fragments are separated by >= 10 Angstroms
+
+# How it works:
+# - Monitors molecular topology at each step
+# - Detects when molecule breaks into fragments (N graphs -> N+1 graphs)
+# - Computes center-of-mass distance between fragments
+# - Marks trajectory as "complete" when fragment separation >= distance_threshold
+# - For batch simulations: stops when ALL trajectories have fragmented and separated
+#   (or when max simulation time is reached)
+
+# Example output:
+# Step 0: All trajectories active, monitoring fragmentation...
+# Step 450: Trajectory 0 fragmented and separated (2 graphs, distance: 10.5 A)
+# Step 620: Trajectory 3 fragmented and separated (2 graphs, distance: 11.2 A)
+# ...
+# All trajectories completed - simulation stopped early

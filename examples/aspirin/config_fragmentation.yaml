@@ -1,0 +1,37 @@
+# PyMARS Topology - Fragmentation-Monitored Collision Simulation
+# This runs collision simulations and stops when molecules fragment and separate
+
+initial_geometry: tests/aspirin.xyz   # path to an XYZ file
+model: /home_lct/lbertagn/FeNNol/fennix-bio1L-lr-omolBio.fnx
+simulation_time[ps]: 50.0              # Maximum simulation time (may stop earlier)
+dt[fs]: 1.0                            # timestep in femtoseconds
+batch_size: 5                          # Run 5 parallel collision trajectories
+temperature: 300.0                     # Initial molecular temperature (K)
+random_rotation: true                  # Randomize initial orientations
+
+# Collision settings
+collision_dynamics: true
+projectile_species: 18                 # Argon atom
+projectile_temperature: 3000.0         # High energy projectile (K)
+projectile_distance: 30.0              # Initial separation (angstrom)
+max_impact_parameter: 1.0              # Random impact parameter (angstrom)
+
+# Output settings
+output_file: trajectory_frag.xyz
+print_step: 50
+
+# Fragmentation monitoring - stops when all trajectories have fragmented and separated
+fragmentation_check: true              # Enable fragmentation detection
+distance_threshold: 10.0               # Stop when fragment COM separation >= 10 Angstroms
+
+# Behavior:
+# - Monitors each trajectory for molecular fragmentation (bond breaking)
+# - When molecule breaks: N fragments -> N+1 fragments
+# - Computes center-of-mass distance between fragments
+# - Trajectory marked "complete" when separation >= distance_threshold
+# - Simulation stops when ALL batch members are complete (or max time reached)
+#
+# This is useful for:
+# - Studying fragmentation dynamics
+# - Efficient sampling (stop after fragmentation occurs)
+# - Analyzing fragment separation kinetics
