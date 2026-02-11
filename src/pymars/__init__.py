@@ -20,6 +20,17 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
+    
+    # Set FENNOL_MODULES_PATH BEFORE any fennol imports
+    # This must be done before importing utils (which imports fennol) and md (which imports fennol)
+    calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)
+    model_file = calc_params.get("model", calc_params.get("model_file", None))
+    if model_file:
+        from pathlib import Path
+        model_path = Path(model_file).resolve()
+        if model_path.exists():
+            model_dir = str(model_path.parent)
+            os.environ['FENNOL_MODULES_PATH'] = model_dir
 
     from fennol.utils.input_parser import convert_dict_units
     from .utils import us
@@ -52,6 +63,7 @@ def main() -> None:
     jax.config.update("jax_default_device", _device)
     jax.config.update("jax_default_matmul_precision", "highest")
 
+    # Import md module AFTER setting FENNOL_MODULES_PATH
     from .md import initialize_collision_simulation
     system = initialize_collision_simulation(simulation_parameters)
 
