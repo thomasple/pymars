@@ -110,11 +110,17 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         )
         print(f"# Time before collision: ~{time_to_impact:.2f} ps")
 
-    model_file = simulation_parameters["model"]
-    assert Path(model_file).is_file(), f"Model file {model_file} does not exist."
+    # Support both "model" and "model_file" keys for backward compatibility
+    model_file = simulation_parameters.get("model_file") or simulation_parameters.get("model")
+    if model_file is None:
+        raise ValueError("Configuration must contain either 'model_file' or 'model' key")
+    
+    model_path = Path(model_file)
+    assert model_path.is_file(), f"Model file {model_file} does not exist."
     print(f"# Using FENNIX model from file: {model_file}")
+    
+    # Load FeNNol model (FENNOL_MODULES_PATH already set in __init__.py)
     from fennol import FENNIX
-
     model = FENNIX.load(model_file)
     model.preproc_state = model.preproc_state.copy({"check_input": False})
     energy_conv = 1.0 / us.get_multiplier(model.energy_unit)

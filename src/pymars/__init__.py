@@ -20,6 +20,16 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
+    
+    # Set FENNOL_MODULES_PATH BEFORE any fennol imports
+    # This allows FeNNol to automatically load custom modules from the model directory
+    model_file = simulation_parameters.get("model_file") or simulation_parameters.get("model")
+    if model_file:
+        from pathlib import Path
+        model_path = Path(model_file).resolve()
+        if model_path.exists():
+            model_dir = str(model_path.parent)
+            os.environ['FENNOL_MODULES_PATH'] = model_dir
 
     from fennol.utils.input_parser import convert_dict_units
     from .utils import us
@@ -62,6 +72,10 @@ def main() -> None:
     species = system["species"]
     masses = system["masses"]
     batch_size = system["batch_size"]
+    
+    # Convert atomic numbers to element symbols for trajectory output
+    from ase.data import chemical_symbols
+    element_symbols = [chemical_symbols[z] for z in species]
 
     simulation_time = simulation_parameters["simulation_time"]  # ps
     dt = system["dt"]  # ps
@@ -120,7 +134,7 @@ def main() -> None:
                 for i in range(batch_size):
                     write_xyz_frame(
                         ftraj[i],
-                        species,
+                        element_symbols,
                         coords[i],
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
