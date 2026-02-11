@@ -2,12 +2,13 @@
 # Structured format similar to NML input files
 
 calculation_parameters:
-  model: "path/to/fennix_model.fnx"  # Path to FENNIX model file
+  model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
+  double_precision: false  # Use double precision (float64) instead of single (float32). Default: false
 
 general_parameters:
   temperature: 300.0  # Temperature in Kelvin
   batch_size: 1  # Number of parallel simulations (trajectories)
-  seed: 12345  # Random seed for reproducibility
+  seed: 12345  # Random seed for reproducibility (0 to 999,999,999). If not set, a random seed is used.
   save_steps: 100  # Save trajectory frames every N steps
   save_energy: 100  # Save energy data every N steps
   save_summary: 1000  # Write summary statistics every N steps (must be >= save_energy)
@@ -25,10 +26,11 @@ projectile_parameters:
   max_impact_parameter: 0.5  # Maximum impact parameter in angstrom
 
 thermostat_parameters:
-  # Note: NVE_thermostat and LGV_thermostat cannot both be true
+  # Currently only NVE (microcanonical, energy-conserving) ensemble is supported
   NVE_thermostat: true  # Use NVE (microcanonical) ensemble
-  LGV_thermostat: false  # Use Langevin thermostat
-  gamma: 0.0  # Friction constant in THz (for Langevin thermostat)
+  # Future thermostat options (not yet implemented):
+  # LGV_thermostat: false  # Use Langevin thermostat
+  # gamma: 0.0  # Friction constant in THz (for Langevin thermostat)
 
 dynamic_parameters:
   dt_dyn: 1.0  # Timestep in femtoseconds (fs)

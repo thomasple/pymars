@@ -62,6 +62,22 @@ def main() -> None:
     _device = jax.devices(device)[0]
     jax.config.update("jax_default_device", _device)
     jax.config.update("jax_default_matmul_precision", "highest")
+    
+    ### Set random seed for reproducibility
+    general_params = simulation_parameters.get("general_parameters", simulation_parameters)
+    random_seed = general_params.get("seed", np.random.randint(0, 2**32 - 1))
+    print(f"# Random seed: {random_seed}")
+    np.random.seed(random_seed)
+    # JAX random key will be set in md.py for velocity sampling
+    
+    ### Set precision (double precision / float64)
+    calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)
+    enable_x64 = calc_params.get("double_precision", False)
+    jax.config.update("jax_enable_x64", enable_x64)
+    if enable_x64:
+        print("# Using double precision (float64)")
+    else:
+        print("# Using single precision (float32)")
 
     # Import md module AFTER setting FENNOL_MODULES_PATH
     from .md import initialize_collision_simulation
