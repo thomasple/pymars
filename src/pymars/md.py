@@ -256,7 +256,9 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     accelerations = forces / masses  # (batch_size, N(+1), 3) depending on collision
 
     # prepare integrator
-    dt = dynamic_params.get("dt_dyn", dynamic_params.get("dt", 1.0 / us.FS))
+    # dt_dyn is given in fs in the input, convert to ps (internal unit)
+    dt_fs = dynamic_params.get("dt_dyn", dynamic_params.get("dt", 1.0))  # fs
+    dt = dt_fs / 1000.0  # Convert fs to ps
     dt2 = dt * 0.5
 
     @jax.jit
@@ -296,12 +298,13 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         )
 
         # Write energy output if requested
+        energy_data = None
         if energy_output_file is not None and step % energy_steps == 0:
-            write_energy_output(
+            energy_data = write_energy_output(
                 energy_output_file, step, velocities, masses, energies, dt
             )
 
-        return coordinates, velocities, accelerations, energies
+        return coordinates, velocities, accelerations, energies, energy_data
 
     def write_energy_output(output_file, step, velocities, masses, potential_energies, dt):
         """Write energy data to output file in FeNNol format."""
@@ -321,8 +324,16 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         N_atoms = velocities.shape[1]
         temperatures = (2.0 * kinetic_energies) / (3.0 * N_atoms * k_B)
         
-        # Time in femtoseconds
-        time_fs = step * dt * us.FS
+        # Time in femtoseconds - determine precision based on dt
+        time_fs = step * dt * 1000.0  # dt is in ps, convert to fs
+        # Determine decimal places: if dt=1.0 fs, show 0 decimals; if dt=0.1, show 1, etc.
+        dt_fs = dt * 1000.0  # Convert dt from ps to fs
+        if dt_fs >= 1.0:
+            time_decimals = 0
+        else:
+            # Count decimal places needed
+            time_decimals = len(str(dt_fs).split('.')[-1].rstrip('0'))
+        time_format = f"{{:.{time_decimals}f}}"
         
         # Convert JAX arrays to numpy for file writing
         total_energies_np = np.array(total_energies)
@@ -330,12 +341,11 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         kinetic_energies_np = np.array(kinetic_energies)
         temperatures_np = np.array(temperatures)
         
-        # Reshape to 1D if needed (handle scalar case for batch_size=1)
-        if total_energies_np.ndim == 0:
-            total_energies_np = np.array([total_energies_np])
-            potential_energies_np = np.array([potential_energies_np])
-            kinetic_energies_np = np.array([kinetic_energies_np])
-            temperatures_np = np.array([temperatures_np])
+        # Ensure arrays are at least 1D for concatenation in summary statistics
+        total_energies_np = np.atleast_1d(total_energies_np)
+        potential_energies_np = np.atleast_1d(potential_energies_np)
+        kinetic_energies_np = np.atleast_1d(kinetic_energies_np)
+        temperatures_np = np.atleast_1d(temperatures_np)
         
         # Write to file for each trajectory in batch
         for b in range(batch_size):
@@ -357,9 +367,19 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 kin_e = float(kinetic_energies_np.flat[b] if kinetic_energies_np.size > 1 else kinetic_energies_np)
                 temp = float(temperatures_np.flat[b] if temperatures_np.size > 1 else temperatures_np)
                 
-                f.write(f"{step:8d} {time_fs:12.4f} {total_e:12.6f} "
+                # Format time with appropriate precision
+                time_str = time_format.format(time_fs)
+                f.write(f"{step:8d} {time_str:>12s} {total_e:12.6f} "
                        f"{pot_e:12.6f} {kin_e:12.6f} "
                        f"{temp:10.2f}\n")
+        
+        # Return energy data for summary statistics
+        return {
+            'total_energies': total_energies_np,
+            'potential_energies': potential_energies_np,
+            'kinetic_energies': kinetic_energies_np,
+            'temperatures': temperatures_np
+        }
 
     return {
         "species": full_species,

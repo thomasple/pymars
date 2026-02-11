@@ -125,14 +125,51 @@ def main() -> None:
 
     time_start = time.time()
     time0 = time_start
-    print(f"#{'Step':>10} {'Time':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
+    
+    # Determine time format precision based on dt
+    dt_fs = dt * 1000.0  # Convert dt from ps to fs
+    if dt_fs >= 1.0:
+        time_decimals = 0
+    else:
+        time_decimals = len(str(dt_fs).split('.')[-1].rstrip('0'))
+    
+    # Get save_summary parameter
+    save_summary = general_params.get("save_summary", None)
+    if save_summary is not None and save_summary < save_energy:
+        raise ValueError(f"save_summary ({save_summary}) must be >= save_energy ({save_energy})")
+    
+    # Get thermostat parameters
+    thermostat_params = simulation_parameters.get("thermostat_parameters", simulation_parameters)
+    is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
+    
+    # Prepare summary file if requested
+    summary_file = output_params.get("summary_file", "summary.out") if save_summary else None
+    
+    # Energy tracking for summary and drift calculation
+    initial_total_energy = None
+    max_energy_drift = 0.0
+    energy_history = []  # Store energy data for summary statistics
+    
+    print(f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
     for istep in range(n_steps):
-        coordinates, velocities, accelerations, energies = integrate(
+        coordinates, velocities, accelerations, energies, energy_data = integrate(
             coordinates, velocities, accelerations,
             step=istep,
             energy_output_file=energy_files if energy_file else None,
             energy_steps=save_energy
         )
+        
+        # Collect energy data for summary statistics
+        if energy_data is not None:
+            energy_history.append(energy_data)
+            # Set initial energy for drift calculation
+            if initial_total_energy is None:
+                initial_total_energy = np.mean(energy_data['total_energies'])
+            # Track maximum energy drift
+            current_total_energy = np.mean(energy_data['total_energies'])
+            drift = abs(current_total_energy - initial_total_energy)
+            max_energy_drift = max(max_energy_drift, drift)
+        
         if (istep + 1) % save_steps == 0:
             time_elapsed = time.time() - time0
             time0 = time.time()
@@ -145,8 +182,15 @@ def main() -> None:
                 coordinates, velocities,energies
             )
 
+            # Format time in femtoseconds with appropriate precision
+            time_fs = (istep+1)*dt * 1000.0  # Convert ps to fs
+            if time_decimals == 0:
+                time_str = f"{time_fs:.0f}"
+            else:
+                time_str = f"{time_fs:.{time_decimals}f}"
+            
             print(
-                f" {istep+1:10} {(istep+1)*dt:12.2f} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
+                f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
             )
             if write_traj:
                 coords = np.array(coordinates)
@@ -157,6 +201,72 @@ def main() -> None:
                         coords[i],
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
+        
+        # Write summary output if requested
+        if save_summary is not None and summary_file is not None and (istep + 1) % save_summary == 0:
+            from fennol.utils.io import human_time_duration
+            
+            # Calculate statistics over the summary interval
+            n_summary_steps = len(energy_history)
+            if n_summary_steps > 0:
+                # Aggregate energy data
+                all_etot = np.concatenate([e['total_energies'] for e in energy_history])
+                all_epot = np.concatenate([e['potential_energies'] for e in energy_history])
+                all_ekin = np.concatenate([e['kinetic_energies'] for e in energy_history])
+                all_temp = np.concatenate([e['temperatures'] for e in energy_history])
+                
+                # Calculate averages and standard deviations
+                avg_etot = np.mean(all_etot)
+                std_etot = np.std(all_etot)
+                avg_epot = np.mean(all_epot)
+                std_epot = np.std(all_epot)
+                avg_ekin = np.mean(all_ekin)
+                std_ekin = np.std(all_ekin)
+                avg_temp = np.mean(all_temp)
+                std_temp = np.std(all_temp)
+                
+                # Calculate energy drift percentage
+                drift_percent = (max_energy_drift / abs(initial_total_energy)) * 100.0 if initial_total_energy != 0 else 0.0
+                
+                # Time statistics
+                time_for_interval = time.time() - time0
+                simulated_time_ps = (istep + 1) * dt
+                total_simulated_time_ps = simulated_time_ps * batch_size
+                total_elapsed_time = time.time() - time_start
+                
+                # Average calculation speed
+                avg_ns_per_day = ns_per_day  # Use the last calculated value
+                avg_step_per_s = save_summary / time_for_interval
+                
+                # Estimate remaining time
+                remaining_steps = n_steps - (istep + 1)
+                est_remaining_time = remaining_steps * (total_elapsed_time / (istep + 1))
+                est_total_duration = total_elapsed_time + est_remaining_time
+                
+                # Write summary to file
+                with open(summary_file, 'a') as f:
+                    f.write("##################################################\n")
+                    f.write(f"# Step {istep+1:_} of {n_steps:_}  ({((istep+1)/n_steps*100):.3f} %)\n")
+                    f.write(f"# Simulated time      : {simulated_time_ps:.3f} ps\n")
+                    f.write(f"# Tot. Simu. time     : {total_simulated_time_ps:.3f} ps\n")
+                    f.write(f"# Tot. elapsed time   : {human_time_duration(total_elapsed_time)}\n")
+                    f.write(f"# Avg. calc. speed: {avg_ns_per_day:.2f} ns/day  ( {avg_step_per_s:.2f} step/s )\n")
+                    f.write(f"# Est. total duration   : {human_time_duration(est_total_duration)}\n")
+                    f.write(f"# Est. remaining time : {human_time_duration(est_remaining_time)}\n")
+                    f.write(f"# Time for {save_summary:_} steps : {human_time_duration(time_for_interval)}\n")
+                    # Only show energy drift for NVE simulations
+                    if is_nve:
+                        f.write(f"# Maximum energy drift (NVE): {max_energy_drift:.2f} kcal/mol ({drift_percent:.1f}%)\n")
+                    f.write(f"# Averages over last {n_summary_steps * save_energy:_} steps :\n")
+                    f.write(f"#   Etot       : {avg_etot:11.2f}   +/- {std_etot:9.3f}  kcal/mol\n")
+                    f.write(f"#   Epot       : {avg_epot:11.2f}   +/- {std_epot:9.2f}  kcal/mol\n")
+                    f.write(f"#   Ekin       : {avg_ekin:11.3f}   +/- {std_ekin:9.2f}  kcal/mol\n")
+                    f.write(f"#   Temper     : {avg_temp:11.1f}   +/- {std_temp:9.0f}  Kelvin\n")
+                    f.write("##################################################\n\n")
+                
+                # Clear energy history for next interval
+                energy_history.clear()
+
 
     if write_traj:
         for f in ftraj: 

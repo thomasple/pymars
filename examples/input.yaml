@@ -10,6 +10,7 @@ general_parameters:
   seed: 12345  # Random seed for reproducibility
   save_steps: 100  # Save trajectory frames every N steps
   save_energy: 100  # Save energy data every N steps
+  save_summary: 1000  # Write summary statistics every N steps (must be >= save_energy)
 
 input_parameters:
   initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
@@ -45,6 +46,8 @@ output_details:
   # energies_file:
   #   - "energies_0.out"
   #   - "energies_1.out"
+  
+  summary_file: "summary.out"  # Output summary statistics file (requires save_summary in general_parameters)
 
 # Energy file format:
 #     Step   Time[fs]       Etot       Epot       Ekin    Temp[K]
