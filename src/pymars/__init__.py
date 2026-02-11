@@ -20,6 +20,16 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
+    
+    # Set FENNOL_MODULES_PATH BEFORE any fennol imports
+    # This allows FeNNol to automatically load custom modules from the model directory
+    model_file = simulation_parameters.get("model_file") or simulation_parameters.get("model")
+    if model_file:
+        from pathlib import Path
+        model_path = Path(model_file).resolve()
+        if model_path.exists():
+            model_dir = str(model_path.parent)
+            os.environ['FENNOL_MODULES_PATH'] = model_dir
 
     from fennol.utils.input_parser import convert_dict_units
     from .utils import us
