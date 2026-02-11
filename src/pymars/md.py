@@ -242,7 +242,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         accelerations = forces / masses  # (batch_size,N+1,3)
 
         velocities = velocities + accelerations * dt2  # (batch_size,N,3)
-        return velocities, accelerations, energies
+        return velocities, accelerations, energies  # energies is (batch_size,)
 
     def integrate(initial_coordinates, initial_velocities, accelerations, step=0, energy_output_file=None, energy_steps=100):
         # Velocity Verlet step
@@ -277,7 +277,8 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     def write_energy_output(output_file, step, velocities, masses, potential_energies, dt):
         """Write energy data to output file in FeNNol format."""
         # Compute kinetic energy: 0.5 * m * v^2
-        kinetic_energies = 0.5 * jnp.sum(masses[None, :, None] * velocities**2, axis=(1, 2))
+        # masses is already shaped (1, N, 1) for broadcasting
+        kinetic_energies = 0.5 * jnp.sum(masses * velocities**2, axis=(1, 2))
         
         # Ensure potential energies are 1D (batch_size,)
         potential_energies = jnp.squeeze(potential_energies)

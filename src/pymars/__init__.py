@@ -112,7 +112,7 @@ def main() -> None:
     else:
         raise ValueError("Either step_dyn or simulation_time must be specified")
     
-    print(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt} ps)")
+    print(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt_fs} fs)")
 
     # Get output parameters
     save_steps = general_params.get("save_steps", general_params.get("print_step", 100))
