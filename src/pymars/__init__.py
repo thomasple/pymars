@@ -102,6 +102,7 @@ def main() -> None:
     
     # Get simulation time parameters
     dt = system["dt"]  # ps
+    dt_fs = dt * 1000.0  # Convert dt from ps to fs
     if "step_dyn" in dynamic_params:
         n_steps = int(dynamic_params["step_dyn"])
         simulation_time = n_steps * dt
@@ -155,7 +156,6 @@ def main() -> None:
     time0 = time_start
     
     # Determine time format precision based on dt
-    dt_fs = dt * 1000.0  # Convert dt from ps to fs
     if dt_fs >= 1.0:
         time_decimals = 0
     else:
