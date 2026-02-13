@@ -1,4 +1,3 @@
-
 import argparse
 import yaml
 import numpy as np
@@ -51,23 +50,20 @@ def main() -> None:
     import jax
     import jax.numpy as jnp
 
-    if device == "cpu":
-        jax.config.update("jax_platforms", "cpu")
-        jax.config.update("jax_cuda_visible_devices", "")
+if device == "cpu":
         jax.config.update("jax_platforms", "cpu")
         jax.config.update("jax_cuda_visible_devices", "")
         simulation_parameters["torch_device"] = "cpu"
-        jax_device_str = "cpu"
     elif device.startswith("cuda") or device.startswith("gpu"):
         jax.config.update("jax_platforms", "")
         if ":" in device:
             num = device.split(":")[-1]
             jax.config.update("jax_cuda_visible_devices", num)
-            jax.config.update("jax_cuda_visible_devices", num)
         else:
             jax.config.update("jax_cuda_visible_devices", "0")
         device = "gpu"
         simulation_parameters["torch_device"] = "cuda:0"
+
     # Select the first device (should be the one exposed by CUDA_VISIBLE_DEVICES)
     try:
         _device = jax.devices()[0]
