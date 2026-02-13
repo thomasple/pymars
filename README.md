@@ -27,18 +27,43 @@ Quickstart (CLI)
 Prepare a YAML configuration (example `config.yaml`):
 
 ```yaml
-# config.yaml
-initial_geometry: tests/aspirin.xyz   # path to an XYZ file or a dict with species/coordinates
-model_file: /path/to/fennix_model     # file understood by fennol.FENNIX.load
-simulation_time[ps]: 10.0              # total simulation time (ps)
-dt[fs]: 1.                             # timestep  1 fs
-batch_size: 1
-temperature: 300.0
-random_rotation: true
-projectile_distance: 30.0                 # angstrom
-max_impact_parameter: 1.0             # angstrom
-output_file: trajectory.xyz
-print_step: 100
+# config.yaml - Structured format similar to NML input files
+
+calculation_parameters:
+  model: /path/to/fennix_model  # file understood by fennol.FENNIX.load
+
+general_parameters:
+  temperature: 300.0            # Temperature in Kelvin
+  batch_size: 1                 # Number of parallel simulations
+  seed: 12345                   # Random seed for reproducibility
+  save_steps: 100               # Save trajectory frames every N steps
+  save_energy: 100              # Save energy data every N steps
+
+input_parameters:
+  initial_geometry: tests/aspirin.xyz  # path to an XYZ file
+  total_charge: 0               # Total molecular charge
+  random_rotation: true         # Apply random rotation
+
+projectile_parameters:
+  projectile_flag: true         # Enable projectile collision simulation
+  projectile_species: 18        # Atomic number (18 = Argon)
+  projectile_temperature: 3000.0  # Projectile temperature (K)
+  projectile_distance: 30.0     # Initial distance (angstrom)
+  max_impact_parameter: 1.0     # Maximum impact parameter (angstrom)
+
+thermostat_parameters:
+  # Note: NVE_thermostat and LGV_thermostat cannot both be true
+  NVE_thermostat: true          # Use NVE (microcanonical) ensemble
+  LGV_thermostat: false         # Use Langevin thermostat
+  gamma: 0.0                    # Friction constant (THz)
+
+dynamic_parameters:
+  dt_dyn: 1.0                   # Timestep in femtoseconds (fs)
+  step_dyn: 10000               # Total number of MD steps
+
+output_details:
+  trajectory_file: trajectory.xyz  # Output trajectory file
+  energies_file: energies.out   # Output energy file
 ```
 
 Run the simulation using the provided CLI entry point:
@@ -89,12 +114,37 @@ Create and run a short batched collision simulation (calls into FeNNol for model
 from pymars.md import initialize_collision_simulation
 
 config = {
-    'initial_geometry': 'tests/aspirin.xyz',
-    'model_file': '/path/to/fennix_model',
-    'simulation_time': 1.0,
-    'dt': 0.001,
-    'batch_size': 2,
-    'temperature': 300.0,
+    'calculation_parameters': {
+        'model': '/path/to/fennix_model',
+    },
+    'input_parameters': {
+        'initial_geometry': 'tests/aspirin.xyz',
+        'total_charge': 0,
+        'random_rotation': True,
+    },
+    'general_parameters': {
+        'temperature': 300.0,
+        'batch_size': 2,
+        'seed': 12345,
+        'save_steps': 100,
+        'save_energy': 100,
+    },
+    'projectile_parameters': {
+        'projectile_flag': True,
+        'projectile_species': 18,
+        'projectile_temperature': 3000.0,
+        'projectile_distance': 30.0,
+        'max_impact_parameter': 1.0,
+    },
+    'thermostat_parameters': {
+        'NVE_thermostat': True,
+        'LGV_thermostat': False,
+        'gamma': 0.0,
+    },
+    'dynamic_parameters': {
+        'dt_dyn': 1.0,
+        'step_dyn': 1000,
+    },
 }
 
 system = initialize_collision_simulation(config)
@@ -103,10 +153,39 @@ coords = system['coordinates']
 vels = system['velocities']
 accs = system['accelerations']
 
+# Setup energy output (optional)
+energy_files = ['traj_0.out', 'traj_1.out']
+save_energy = 100  # Write every 100 steps
+
 # perform a few integration steps
 for i in range(10):
-    coords, vels, accs, energies = integrate(coords, vels, accs)
+    coords, vels, accs, energies = integrate(
+        coords, vels, accs,
+        step=i,
+        energy_output_file=energy_files,
+        energy_steps=save_energy
+    )
     print('Step', i, 'E_total mean:', energies.mean())
+```
+
+**Energy Output Format:**
+
+When `energy_output_file` is specified, pymars writes energy data in FeNNol-compatible format:
+
+```
+    Step   Time[fs]       Etot       Epot       Ekin    Temp[K]
+       0      0.0000   -123.456789  -125.678901    2.222112    300.00
+     100    100.0000   -123.457890  -124.567890    1.109999    250.12
+```
+
+Columns:
+- `Step`: Integration step number
+- `Time[fs]`: Time in femtoseconds
+- `Etot`: Total energy (kcal/mol)
+- `Epot`: Potential energy (kcal/mol)  
+- `Ekin`: Kinetic energy (kcal/mol)
+- `Temp[K]`: Temperature (Kelvin)
+
 ```
 
 API summary
