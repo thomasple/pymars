@@ -1,9 +1,8 @@
+
 import argparse
 import yaml
 import numpy as np
 import os
-import jax
-import jax.numpy as jnp
 import time
 
 
@@ -32,36 +31,75 @@ def main() -> None:
             model_dir = str(model_path.parent)
             os.environ['FENNOL_MODULES_PATH'] = model_dir
 
-    from fennol.utils.input_parser import convert_dict_units
-    from .utils import us
-    simulation_parameters = convert_dict_units(simulation_parameters, us)
+    # Note: postpone importing fennol/.utils (which may import jax) until after
+    # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
+    # happens with the intended environment. See below where these imports
+    # are performed after importing jax.
 
-    ### Set the device
+   # Set the device
     if "MARS_DEVICE" in os.environ:
         device = os.environ["MARS_DEVICE"].lower()
         print(f"# Setting device from env MARS_DEVICE={device}")
     else:
-        device = simulation_parameters.get("device", "cpu").lower()
+        # prefer calculation_parameters.device if present
+        device = calc_params.get("device", simulation_parameters.get("device", "cpu")).lower()
         """@keyword[fennol_md] device
         Computation device. Options: 'cpu', 'cuda:N', 'gpu:N' where N is device number.
         Default: 'cpu'
         """
+    # Now import jax and set configs
+    import jax
+    import jax.numpy as jnp
+
     if device == "cpu":
         jax.config.update("jax_platforms", "cpu")
         jax.config.update("jax_cuda_visible_devices", "")
+        jax.config.update("jax_platforms", "cpu")
+        jax.config.update("jax_cuda_visible_devices", "")
         simulation_parameters["torch_device"] = "cpu"
+        jax_device_str = "cpu"
     elif device.startswith("cuda") or device.startswith("gpu"):
+        jax.config.update("jax_platforms", "")
         if ":" in device:
             num = device.split(":")[-1]
+            jax.config.update("jax_cuda_visible_devices", num)
             jax.config.update("jax_cuda_visible_devices", num)
         else:
             jax.config.update("jax_cuda_visible_devices", "0")
         device = "gpu"
         simulation_parameters["torch_device"] = "cuda:0"
-
-    _device = jax.devices(device)[0]
+    # Select the first device (should be the one exposed by CUDA_VISIBLE_DEVICES)
+    try:
+        _device = jax.devices()[0]
+    except RuntimeError as e:
+        print(f"# Error initializing JAX device: {e}")
+        print("# Exiting due to device initialization failure.")
+        print("# Detailed error information:")
+        import traceback
+        traceback.print_exc()
+        import sys
+        sys.exit(1)
     jax.config.update("jax_default_device", _device)
     jax.config.update("jax_default_matmul_precision", "highest")
+ 
+    # Debug prints to help diagnose device selection issues
+    #print(f"# CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
+    #try:
+    #    print(f"# jax.devices(): {jax.devices()}")
+    #except Exception as e:
+    #    print(f"# Error listing jax.devices(): {e}")
+    # Print a concise message showing which device will be used for computations
+    used_dev = simulation_parameters.get("torch_device", None)
+    if used_dev is None:
+        # fallback to JAX's detected device
+        used_dev = str(_device)
+    print(f"# Using device: {used_dev}")
+
+    # Now it's safe to import fennol utilities and convert units because
+    # JAX has been imported and configured with the intended device.
+    from fennol.utils.input_parser import convert_dict_units
+    from .utils import us
+    simulation_parameters = convert_dict_units(simulation_parameters, us)
     
     ### Set random seed for reproducibility
     general_params = simulation_parameters.get("general_parameters", simulation_parameters)
