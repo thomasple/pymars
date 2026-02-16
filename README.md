@@ -1,24 +1,31 @@
 # pymars
 
-pymars is a small toolkit to prepare and run classical molecular collision simulations. It provides helpers to build initial configurations, set up short-range ZBL repulsion for projectile atoms and to run short collision simulations using FeNNol energy models.
+pymars is a compact toolkit to prepare and run classical molecular collision simulations. It provides helpers to build initial configurations, set up short-range ZBL repulsion for projectile atoms and run short collision simulations using FeNNol energy models.
 
-The codebase is intentionally compact and focuses on collision setup and trajectory integration; FeNNol is used to provide model energies and forces while a simple ZBL-like repulsion model handles short-range interactions with incoming projectiles.
+The project focuses on collision setup and trajectory integration. FeNNol provides model energies and forces while a simple ZBL-like repulsion model handles short-range interactions with incoming projectiles.
 
 Key features
 - Read and center XYZ geometries and produce batched conformations.
 - Sample Maxwell–Boltzmann velocities and remove center-of-mass translation/rotation.
 - Generate randomized orientations and uniformly sampled impact parameters for collision projectiles.
 - Integrate dynamics with a Velocity-Verlet step combining FeNNol energies and a repulsive potential.
+- Batch-mode support (run multiple trajectories in parallel) and reproducible runs via `seed`.
 
 Requirements & installation
 - Python >= 3.10
-- Core runtime dependencies: `fennol` (see `pyproject.toml`), `numpy`, `scipy`, and `jax` (used by FeNNol workflows).
+- Core runtime dependencies: `fennol` (see `pyproject.toml`), `numpy`, `scipy`, and `jax` (used by FeNNol workflows). Prefer installing heavy native packages from `conda-forge` on clusters.
+
+See `installation_guide.txt` for a step-by-step installation and cluster notes.
 
 Install from source (editable install):
 
 ```bash
-uv sync
-source .venv/bin/activate
+# create/activate a conda env first, e.g.:
+conda create -n pymars-gpu python=3.10 -y
+conda activate pymars-gpu
+
+# then install editable package (skip deps if you prefer to manage them with conda)
+pip install -e . --no-deps
 ```
 
 
@@ -27,43 +34,69 @@ Quickstart (CLI)
 Prepare a YAML configuration (example `config.yaml`):
 
 ```yaml
-# config.yaml - Structured format similar to NML input files
+# config.yaml - PyMARS Simulation Configuration Input
 
 calculation_parameters:
-  model: /path/to/fennix_model  # file understood by fennol.FENNIX.load
+  device: cpu  # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
+  model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
+  double_precision: false  # Use double precision (float64) instead of single (float32). Default: false
 
 general_parameters:
-  temperature: 300.0            # Temperature in Kelvin
-  batch_size: 1                 # Number of parallel simulations
-  seed: 12345                   # Random seed for reproducibility
-  save_steps: 100               # Save trajectory frames every N steps
-  save_energy: 100              # Save energy data every N steps
+  temperature: 300.0     # Temperature in Kelvin
+  batch_size: 1          # Number of parallel simulations (trajectories)
+  seed: 123456789        # Random seed for reproducibility (0 to 999,999,999). 
+                         # If not set, a random seed is used.
+  save_steps: 100        # Save trajectory frames every N steps
+  save_energy: 100       # Save energy data every N steps
+  save_summary: 1000     # Write summary statistics every N steps (must be >= save_energy)
 
 input_parameters:
-  initial_geometry: tests/aspirin.xyz  # path to an XYZ file
-  total_charge: 0               # Total molecular charge
-  random_rotation: true         # Apply random rotation
+  initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
+  total_charge: 0  # Total molecular charge
+  random_rotation: true  # Apply random rotation to initial configuration
 
 projectile_parameters:
-  projectile_flag: true         # Enable projectile collision simulation
-  projectile_species: 18        # Atomic number (18 = Argon)
-  projectile_temperature: 3000.0  # Projectile temperature (K)
-  projectile_distance: 30.0     # Initial distance (angstrom)
-  max_impact_parameter: 1.0     # Maximum impact parameter (angstrom)
+  projectile_flag: true  # Enable projectile collision simulation
+  projectile_species: 18  # Atomic number (18 = Argon)
+  projectile_temperature: 3000.0  # Projectile temperature in Kelvin
+  projectile_distance: 20.0  # Initial projectile distance in angstrom
+  max_impact_parameter: 0.5  # Maximum impact parameter in angstrom
 
 thermostat_parameters:
-  # Note: NVE_thermostat and LGV_thermostat cannot both be true
-  NVE_thermostat: true          # Use NVE (microcanonical) ensemble
-  LGV_thermostat: false         # Use Langevin thermostat
-  gamma: 0.0                    # Friction constant (THz)
+  # Currently only NVE (microcanonical, energy-conserving) ensemble is supported
+  NVE_thermostat: true  # Use NVE (microcanonical) ensemble
+  # Future thermostat options (not yet implemented):
+  # LGV_thermostat: false  # Use Langevin thermostat
+  # gamma: 0.0  # Friction constant in THz (for Langevin thermostat)
 
 dynamic_parameters:
-  dt_dyn: 1.0                   # Timestep in femtoseconds (fs)
-  step_dyn: 10000               # Total number of MD steps
+  dt_dyn: 1.0  # Timestep in femtoseconds (fs)
+  step_dyn: 10000  # Total number of MD steps
 
 output_details:
-  trajectory_file: trajectory.xyz  # Output trajectory file
-  energies_file: energies.out   # Output energy file
+  trajectory_file: "trajectory.xyz"  # Output trajectory file
+  # For batch simulations, you can provide a list:
+  # trajectory_file:
+  #   - "trajectory_0.xyz"
+  #   - "trajectory_1.xyz"
+  
+  energies_file: "energies.out"  # Output energy file
+  # For batch simulations, you can provide a list:
+  # energies_file:
+  #   - "energies_0.out"
+  #   - "energies_1.out"
+  
+  summary_file: "summary.out"  # Output summary statistics file (requires save_summary in general_parameters)
+
+# Energy file format:
+#     Step   Time[fs]       Etot       Epot       Ekin    Temp[K]
+# Where:
+#   Step: Integration step number
+#   Time[fs]: Time in femtoseconds
+#   Etot: Total energy (kcal/mol)
+#   Epot: Potential energy (kcal/mol)
+#   Ekin: Kinetic energy (kcal/mol)
+#   Temp[K]: Temperature (Kelvin)
 ```
 
 Run the simulation using the provided CLI entry point:
