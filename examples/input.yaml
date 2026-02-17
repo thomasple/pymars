@@ -5,6 +5,7 @@ calculation_parameters:
   device: cpu  # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
   model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
   double_precision: false  # Use double precision (float64) instead of single (float32). Default: false
+  restart_traj: false  # If true, continue from <initialxyzfilename>.dyn.restart if it exists; always saves last state
 
 general_parameters:
   temperature: 300.0  # Temperature in Kelvin

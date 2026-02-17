@@ -30,6 +30,16 @@ def main() -> None:
             model_dir = str(model_path.parent)
             os.environ['FENNOL_MODULES_PATH'] = model_dir
 
+    # --- Restart logic: determine restart file name ---
+    input_params = simulation_parameters.get("input_parameters", {})
+    initial_xyz = input_params.get("initial_geometry", None)
+    if initial_xyz is not None:
+        base_xyz = os.path.basename(initial_xyz)
+        restart_file = os.path.splitext(base_xyz)[0] + ".dyn.restart"
+    else:
+        restart_file = "traj.dyn.restart"
+    restart_traj = bool(calc_params.get("restart_traj", False))
+
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
     # happens with the intended environment. See below where these imports
@@ -130,12 +140,29 @@ def main() -> None:
     system = initialize_collision_simulation(simulation_parameters)
 
     integrate = system["integrate"]
+    # Default: start from initial configuration
     coordinates = system["coordinates"]
     velocities = system["velocities"]
     accelerations = system["accelerations"]
     species = system["species"]
     masses = system["masses"]
     batch_size = system["batch_size"]
+    start_step = 0
+
+    # If restart_traj is true and restart file exists, load state
+    if restart_traj and os.path.exists(restart_file):
+        print(f"# Restarting trajectory from {restart_file}")
+        arr = np.load(restart_file)
+        coordinates = arr["coordinates"]
+        velocities = arr["velocities"]
+        accelerations = arr["accelerations"]
+        if "step" in arr:
+            start_step = int(arr["step"])
+        else:
+            start_step = 0
+    else:
+        if restart_traj:
+            print(f"# restart_traj is True but {restart_file} not found, starting from initial configuration.")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -225,7 +252,7 @@ def main() -> None:
     energy_history = []  # Store energy data for summary statistics
     
     print(f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
-    for istep in range(n_steps):
+    for istep in range(start_step, n_steps):
         coordinates, velocities, accelerations, energies, energy_data = integrate(
             coordinates, velocities, accelerations,
             step=istep,
@@ -345,6 +372,14 @@ def main() -> None:
     if write_traj:
         for f in ftraj: 
             f.close()
+    # --- Always save last state for restart ---
+    np.savez(restart_file,
+        coordinates=coordinates,
+        velocities=velocities,
+        accelerations=accelerations,
+        step=n_steps
+    )
+    print(f"# Saved last state to {restart_file}")
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
     nsperday = (simulation_time / total_time)*60*60*24*us.NS
