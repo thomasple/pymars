@@ -50,10 +50,10 @@ def main() -> None:
     import jax
     import jax.numpy as jnp
 
-if device == "cpu":
-        jax.config.update("jax_platforms", "cpu")
-        jax.config.update("jax_cuda_visible_devices", "")
-        simulation_parameters["torch_device"] = "cpu"
+    if device == "cpu":
+            jax.config.update("jax_platforms", "cpu")
+            jax.config.update("jax_cuda_visible_devices", "")
+            simulation_parameters["torch_device"] = "cpu"
     elif device.startswith("cuda") or device.startswith("gpu"):
         jax.config.update("jax_platforms", "")
         if ":" in device:
