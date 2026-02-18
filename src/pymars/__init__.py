@@ -46,23 +46,34 @@ def main() -> None:
         Computation device. Options: 'cpu', 'cuda:N', 'gpu:N' where N is device number.
         Default: 'cpu'
         """
-    # Now import jax and set configs
+    
+        # CRITICAL: Set CUDA_VISIBLE_DEVICES BEFORE importing jax
+    if device == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""  # No GPUs
+    elif device.startswith("cuda") or device.startswith("gpu"):
+        # Extract GPU index (e.g. "cuda:1" -> "1")
+        if ":" in device:
+            gpu_index = device.split(":", 1)[1]
+        else:
+            gpu_index = "0"
+        
+        # Make ONLY this physical GPU visible to the entire process
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
+        print(f"# Set CUDA_VISIBLE_DEVICES={gpu_index}")
+        
+        simulation_parameters["torch_device"] = "cuda:0"  # Always cuda:0 within visible set
+        device = "gpu"
+
+    # Now import jax (AFTER environment is set)
     import jax
     import jax.numpy as jnp
 
+    # Configure JAX (always use first/only visible device)
     if device == "cpu":
-            jax.config.update("jax_platforms", "cpu")
-            jax.config.update("jax_cuda_visible_devices", "")
-            simulation_parameters["torch_device"] = "cpu"
-    elif device.startswith("cuda") or device.startswith("gpu"):
+        jax.config.update("jax_platforms", "cpu")
+    elif device == "gpu":
         jax.config.update("jax_platforms", "")
-        if ":" in device:
-            num = device.split(":")[-1]
-            jax.config.update("jax_cuda_visible_devices", num)
-        else:
-            jax.config.update("jax_cuda_visible_devices", "0")
-        device = "gpu"
-        simulation_parameters["torch_device"] = "cuda:0"
+        jax.config.update("jax_cuda_visible_devices", "0")  # First visible GPU
 
     # Select the first device (should be the one exposed by CUDA_VISIBLE_DEVICES)
     try:
@@ -75,6 +86,7 @@ def main() -> None:
         traceback.print_exc()
         import sys
         sys.exit(1)
+
     jax.config.update("jax_default_device", _device)
     jax.config.update("jax_default_matmul_precision", "highest")
  
