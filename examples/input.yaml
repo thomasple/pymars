@@ -51,6 +51,7 @@ output_details:
   #   - "energies_0.out"
   #   - "energies_1.out"
   
+  track_variance: false  # If true, add a variance column to energies.out (if model supports it)
   summary_file: "summary.out"  # Output summary statistics file (requires save_summary in general_parameters)
 
 # Energy file format:

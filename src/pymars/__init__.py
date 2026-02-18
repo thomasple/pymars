@@ -202,7 +202,7 @@ def main() -> None:
         else:
             num=len(str(batch_size-1))
             ftraj = [open(traj_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
-    
+
     # Get energy output file
     energy_file = output_params.get("energies_file", output_params.get("energy_output_file", None))
     if energy_file:
@@ -213,6 +213,9 @@ def main() -> None:
                 energy_files = [energy_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
         else:
             energy_files = energy_file
+
+    # Track variance option
+    track_variance = bool(output_params.get("track_variance", False))
 
     @jax.jit
     def mean_energies_and_remove_com(coordinates, velocities,epots):
@@ -251,7 +254,10 @@ def main() -> None:
     max_energy_drift = 0.0
     energy_history = []  # Store energy data for summary statistics
     
-    print(f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
+    header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
+    if track_variance:
+        header += f" {'Var':>12}"
+    print(header)
     for istep in range(start_step, n_steps):
         coordinates, velocities, accelerations, energies, energy_data = integrate(
             coordinates, velocities, accelerations,
@@ -259,7 +265,7 @@ def main() -> None:
             energy_output_file=energy_files if energy_file else None,
             energy_steps=save_energy
         )
-        
+
         # Collect energy data for summary statistics
         if energy_data is not None:
             energy_history.append(energy_data)
@@ -270,7 +276,18 @@ def main() -> None:
             current_total_energy = np.mean(energy_data['total_energies'])
             drift = abs(current_total_energy - initial_total_energy)
             max_energy_drift = max(max_energy_drift, drift)
-        
+
+        # Extract variance if requested and available
+        variance_val = None
+        if track_variance:
+            # Try to get variance from energy_data or energies
+            if energy_data is not None and "variances" in energy_data:
+                variance_val = np.mean(energy_data["variances"])
+            elif hasattr(energies, "var"):
+                variance_val = float(np.var(energies))
+            else:
+                variance_val = 0.0
+
         if (istep + 1) % save_steps == 0:
             time_elapsed = time.time() - time0
             time0 = time.time()
@@ -289,10 +306,12 @@ def main() -> None:
                 time_str = f"{time_fs:.0f}"
             else:
                 time_str = f"{time_fs:.{time_decimals}f}"
-            
-            print(
-                f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
-            )
+
+            line = f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
+            if track_variance:
+                line += f" {variance_val:12.5f}"
+            print(line)
+
             if write_traj:
                 coords = np.array(coordinates)
                 for i in range(batch_size):
