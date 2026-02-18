@@ -144,7 +144,7 @@ def test_integrate_signature_has_fragmentation_params(test_data_dir):
             "species": [1, 1],
             "coordinates": [[0, 0, 0], [0.7, 0, 0]],
         },
-        "model": str(test_data_dir / "mock_model.pt"),
+        "model": str(test_data_dir / "mock_model.fnx"),
         "collision_dynamics": False,
         "temperature": 300.0,
         "batch_size": 1,
