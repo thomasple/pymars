@@ -219,6 +219,30 @@ Columns:
 - `Ekin`: Kinetic energy (kcal/mol)
 - `Temp[K]`: Temperature (Kelvin)
 
+Restart files and variance tracking
+---------------------------------
+
+Restart files
+: When a run finishes pymars saves the last state to a restart file so you can resume later. The restart filename is derived from the input geometry basename and is written next to the input YAML (for example, when your YAML is `examples/input.yaml` the restart file will be `examples/<base>.dyn.restart.npz`). numpy's `savez` is used, so the on-disk file ends with `.npz`.
+
+To resume a run set `calculation_parameters.restart_traj: true` in your YAML. pymars will look for `<base>.dyn.restart` and `<base>.dyn.restart.npz` next to the YAML and load positions/velocities/accelerations and the saved `step` if present.
+
+Variance tracking (model-provided)
+: If your FeNNol model exposes an ensemble variance per-frame named `etot_ensemble_var` pymars can record it in the energy output. Enable this with:
+
+```yaml
+output_details:
+  energies_file: "energies.out"
+  track_variance: true
+```
+
+When enabled, the energies file will include an additional column `Var(eV^2)` (the model-provided variance; units are left as eV^2). The variance value is written only in the energy output file (`energies.out`) and is **not** printed in the regular console summary to avoid spurious `None` values when the model does not provide variance.
+
+Notes:
+- If your model does not provide `etot_ensemble_var`, the `Var(eV^2)` column will contain `None` for that frame.
+- `track_variance` is meaningful only for single-trajectory runs (batch_size == 1). If `track_variance: true` and `batch_size > 1` pymars will disable the option and print a warning because the ensemble variance per-frame is not defined across parallel trajectories.
+
+
 ```
 
 API summary
