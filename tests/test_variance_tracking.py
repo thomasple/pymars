@@ -102,7 +102,7 @@ class TestVarianceTracking:
 
         mock_model = _make_mock_model(etot_ensemble_var=expected_var, n_atoms=21)
 
-        with patch("pymars.md.FENNIX") as MockFENNIX:
+        with patch("fennol.FENNIX") as MockFENNIX:
             MockFENNIX.load.return_value = mock_model
             system = initialize_collision_simulation(sim_params, verbose=False)
 
