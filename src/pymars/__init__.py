@@ -35,10 +35,17 @@ def main() -> None:
     initial_xyz = input_params.get("initial_geometry", None)
     if initial_xyz is not None:
         base_xyz = os.path.basename(initial_xyz)
-        restart_file = os.path.splitext(base_xyz)[0] + ".dyn.restart"
+        restart_file_name = os.path.splitext(base_xyz)[0] + ".dyn.restart"
     else:
-        restart_file = "traj.dyn.restart"
+        restart_file_name = "traj.dyn.restart"
     restart_traj = bool(calc_params.get("restart_traj", False))
+
+    # Determine restart file path: place the restart file next to the input YAML
+    input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
+    restart_file = os.path.join(input_yaml_dir, restart_file_name)
+    # Also show where we'll look/save restart files
+    # (useful when working directories or folder names change)
+    print(f"# Restart file will be: {restart_file}")
 
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
@@ -149,20 +156,28 @@ def main() -> None:
     batch_size = system["batch_size"]
     start_step = 0
 
-    # If restart_traj is true and restart file exists, load state
-    if restart_traj and os.path.exists(restart_file):
-        print(f"# Restarting trajectory from {restart_file}")
-        arr = np.load(restart_file)
-        coordinates = arr["coordinates"]
-        velocities = arr["velocities"]
-        accelerations = arr["accelerations"]
-        if "step" in arr:
-            start_step = int(arr["step"])
+    # If restart_traj is true, try to locate a restart file. numpy.savez
+    # appends a .npz extension if it is not present, so check both
+    # '<prefix>.dyn.restart' and '<prefix>.dyn.restart.npz'.
+    if restart_traj:
+        candidates = [restart_file, restart_file + ".npz"]
+        found = None
+        for p in candidates:
+            if os.path.exists(p):
+                found = p
+                break
+        if found is not None:
+            print(f"# Restarting trajectory from {found}")
+            arr = np.load(found)
+            coordinates = arr["coordinates"]
+            velocities = arr["velocities"]
+            accelerations = arr["accelerations"]
+            if "step" in arr:
+                start_step = int(arr["step"])
+            else:
+                start_step = 0
         else:
-            start_step = 0
-    else:
-        if restart_traj:
-            print(f"# restart_traj is True but {restart_file} not found, starting from initial configuration.")
+            print(f"# restart_traj is True but no restart file found among: {candidates}; starting from initial configuration.")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -392,10 +407,25 @@ def main() -> None:
         for f in ftraj: 
             f.close()
     # --- Always save last state for restart ---
+    # Ensure directory exists (should, as it's input yaml dir)
+    try:
+        os.makedirs(os.path.dirname(restart_file), exist_ok=True)
+    except Exception:
+        pass
+    # Convert JAX arrays to numpy before saving to ensure compatibility
+    try:
+        save_coords = np.asarray(coordinates)
+        save_vels = np.asarray(velocities)
+        save_accs = np.asarray(accelerations)
+    except Exception:
+        save_coords = coordinates
+        save_vels = velocities
+        save_accs = accelerations
+
     np.savez(restart_file,
-        coordinates=coordinates,
-        velocities=velocities,
-        accelerations=accelerations,
+        coordinates=save_coords,
+        velocities=save_vels,
+        accelerations=save_accs,
         step=n_steps
     )
     print(f"# Saved last state to {restart_file}")
