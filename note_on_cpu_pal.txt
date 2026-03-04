@@ -1,0 +1,17 @@
+When you set device: cpu (or use MARS_DEVICE=cpu), JAX uses all available CPU cores by default for parallel computation. This is why you see pymars using 300% CPU—it means it's using 3 cores (or threads) at full capacity.
+
+Why does this happen?
+
+JAX (and numpy, scipy, etc.) use multi-threaded BLAS/LAPACK libraries (like OpenBLAS, MKL, or Eigen).
+By default, these libraries use as many threads as there are CPU cores, or as allowed by environment variables.
+So, a single pymars process can use multiple CPU cores, leading to >100% CPU usage in top or htop.
+How to control CPU usage:
+You can limit the number of threads used by setting environment variables before running pymars:
+```
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export XLA_FLAGS=--xla_cpu_multi_thread_eigen=false
+```
+JAX and its dependencies use all available CPU threads by default for speed. Limit with the above environment variables if you want to restrict CPU usage.

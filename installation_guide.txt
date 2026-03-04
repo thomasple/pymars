@@ -1,0 +1,155 @@
+PyMARS GPU/CPU Installation Guide
+================================
+
+This guide helps you install PyMARS (energy branch) and FeNNol on a shared cluster with both CPU and GPU nodes.
+
+---
+
+1. Create a new conda environment (recommended Python 3.10):
+
+    conda create -n pymars-gpu python=3.10 -y
+    conda activate pymars-gpu
+
+2. Install CUDA-enabled JAX (check your CUDA version with nvidia-smi):
+
+    # For CUDA 12:
+    pip install --upgrade "jax[cuda12]"
+    # For CUDA 11:
+    # pip install --upgrade "jax[cuda11]"
+
+3. Install compiler toolchain (if needed for building dependencies):
+
+    conda install -c conda-forge gcc_linux-64 gxx_linux-64 -y
+
+4. Install FeNNol and dependencies:
+
+    # Try conda for heavy dependencies
+    conda install -c conda-forge h5py tensorstore ase
+    # Then pip for FeNNol (skip extras to avoid tensorstore build)
+    pip install fennol --no-deps
+    pip install numba optax sympy tomlkit pytest flax msgpack rich treescope typing_extensions
+
+5. Clone and install PyMARS (energy branch):
+
+    git clone https://github.com/thomasple/pymars.git pymars_new
+    cd pymars_new
+    git checkout energy
+    pip install -e . --no-deps
+    pip install pyyaml ase
+    
+------Troubleshooting deps (flax, optax)
+	# Install h5py and other problematic packages from conda-forge
+	conda install -c conda-forge h5py tensorstore -y
+
+	# Skip FeNNol and just install pymars with minimal dependencies
+	pip install -e . --no-deps
+	pip install pyyaml ase numpy scipy
+
+	# Install flax WITHOUT the [all] extras (avoids tensorstore rebuild)
+	pip install flax --no-deps
+	pip install msgpack rich treescope typing_extensions
+
+	# Now install fennol without dependencies
+	pip install fennol --no-deps
+
+	# Install remaining fennol dependencies manually
+	pip install numba sympy tomlkit pytest
+	pip install optax PyYAML
+
+	# Finally install pymars
+	cd ~/pymars_new
+	pip install -e . --no-deps
+	pip install pyyaml ase
+6. Test your installation (on a GPU node!):
+
+    conda activate pymars-gpu
+    python -c "import jax; print('JAX version:', jax.__version__); print('Devices:', jax.devices())"
+    python -c "from fennol import FENNIX; print('FeNNol OK')"
+    python -c "import pymars; print('PyMARS OK')"
+    pymars --help
+
+---
+
+**Notes:**
+- If you get AVX errors, you are on a login node with an old CPU. Run on a GPU/compute node.
+- If you get disk space errors, clean up with `conda clean --all -y` and `pip cache purge`.
+- To select device, set `device: cpu` or `device: cuda:0` in your input.yaml under calculation_parameters, or set the environment variable `MARS_DEVICE`.
+- If you need to remove an environment: `conda env remove -n ENVNAME`
+
+ON GPU:
+# 1. Make sure you are still on a GPU node
+nvidia-smi
+
+# 2. IF: WARNING: An NVIDIA GPU may be present … but a CUDA-enabled jaxlib is not installed.
+Devices: [CpuDevice(id=0)]
+
+Clean out CPU wheels (again, but this is correct)
+python -m pip uninstall -y jax jaxlib
+
+# 3. Install CUDA-enabled JAX from the official wheel index
+python -m pip install \
+  --upgrade \
+  "jax[cuda12]" \
+  -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+  
+IF:
+
+Then:  export JAX_PLATFORMS=cuda
+---
+
+Troubleshooting: Why the installation failed on your device (summary + fixes)
+
+
+h5py wheel build error: the build process reported
+"Unable to load dependency HDF5... libhdf5.so: cannot open shared object file: No such file or directory"
+That means pip tried to compile h5py from source and the system HDF5 library (libhdf5) is missing or not visible.
+tensorstore wheel build error: the build used Bazel and the downloaded bazel binary expected newer system libraries:
+"/lib64/libc.so.6: version `GLIBC_2.25' not found" and missing modern symbols in libstdc++ (CXXABI_1.3.11, GLIBCXX_3.4.21, …).
+So the Bazel binary cannot run on this machine because system glibc/libstdc++ are too old.
+
+pip will try to build packages from source if no compatible pre-built wheel is available for your platform & Python version.
+Building h5py requires the HDF5 C library (libhdf5) to be available at build time; if not, build fails.
+tensorstore uses Bazel to build native code; the bundled Bazel binary requires newer system runtime libs. On older cluster OS images the system glibc/libstdc++ are out-of-date.
+Also, different nodes may have different CPU features (AVX) causing jaxlib wheel incompatibilities on login nodes — that’s a separate but related runtime problem you observed.
+Practical remediation (recommended, in order)
+
+Use conda-forge to install heavy native deps (no compilation):
+conda install -c conda-forge h5py tensorstore hdf5 ase
+This will install prebuilt binaries that match the conda toolchain, avoiding pip builds.
+Install fennol and other Python packages with pip but skip heavy builds:
+pip install fennol --no-deps
+pip install -e . --no-deps (install pymars editable without rebuilding JAX/h5py/tensorstore)
+Then install smaller Python-only deps via pip (pyyaml, msgpack, etc).
+If you must pip-install a package that builds native extensions:
+Ensure a modern compiler is available (conda gcc_linux-64/gxx_linux-64).
+Ensure system libraries exist (but you likely can’t upgrade system glibc/libstdc++).
+Prefer conda binaries instead of pip-built ones on such clusters.
+For tensorstore/orbax-checkpoint/flax extras:
+Avoid installing flax[all] or fennol extras that pull in tensorstore unless you have a matching conda package or newer system libraries. Install flax without [all], and avoid orbax features requiring tensorstore if possible.
+For h5py specifically:
+conda install -c conda-forge h5py
+or, if you must use pip, make libhdf5 available via conda first: conda install -c conda-forge hdf5, then pip install h5py (pip wheel may pick up libhdf5).
+Disk-space and build environment:
+Clear pip/conda caches before heavy installs: pip cache purge and conda clean --all -y.
+Remove unused environments or move large data out of your home to free space for builds.
+Quick commands to try (safe sequence)
+
+# activate the environment you will use
+conda activate pymars-env
+
+# Prefer conda for heavy native packages
+conda install -c conda-forge h5py tensorstore hdf5 ase -y
+
+# If that succeeds, install fennol without pulling heavy deps:
+pip install fennol --no-deps
+
+# Install pymars editable without pulling dependencies:
+cd ~/pymars_new
+pip install -e . --no-deps
+
+# Then add small Python deps:
+pip install pyyaml numba optax sympy msgpack rich
+
+If conda-install for tensorstore fails (because conda-forge binary not available for your platform), fallback:
+Skip features that require tensorstore (orbax checkpointing).
+Or request admin support to provide a newer system runtime or a module with a recent libstdc++/glibc.
