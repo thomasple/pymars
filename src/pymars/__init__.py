@@ -407,13 +407,15 @@ def main() -> None:
         save_vels = velocities
         save_accs = accelerations
 
-    np.savez(restart_file,
+    # Ensure we know the exact filename np.savez will create
+    restart_save_file = restart_file if restart_file.endswith(".npz") else restart_file + ".npz"
+    np.savez(restart_save_file,
         coordinates=save_coords,
         velocities=save_vels,
         accelerations=save_accs,
         step=n_steps
     )
-    print(f"# Saved last state to {restart_file}")
+    print(f"# Saved last state to {restart_save_file}")
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
     nsperday = (simulation_time / total_time)*60*60*24*us.NS
