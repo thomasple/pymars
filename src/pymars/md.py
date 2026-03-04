@@ -191,8 +191,13 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             coordinates_model = full_coordinates[:, 1:, :]
             projectile_coordinates = full_coordinates[:, 0, :]
             energies_model, forces_model, aux = model._energy_and_forces(model.variables, conformation)
-            # Extract per-frame ensemble variance if model provides it (units: eV^2, not converted)
-            etot_ensemble_var = aux.get("etot_ensemble_var", None) if isinstance(aux, dict) else None
+            # Extract per-frame ensemble variance if model provides it (units: eV^2, not converted).
+            # Always return a JAX array here so that JIT tracing is not broken when the key is absent.
+            if isinstance(aux, dict) and "etot_ensemble_var" in aux:
+                etot_ensemble_var = aux["etot_ensemble_var"]
+            else:
+                # Use NaN as a sentinel for "missing" ensemble variance; downstream code can detect this.
+                etot_ensemble_var = jnp.full_like(energies_model, jnp.nan)
             energies_repulsion, forces_repulsion, projectile_forces = (
                 repulsion_energies_and_forces(coordinates_model, projectile_coordinates)
             )
