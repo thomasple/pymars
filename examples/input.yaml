@@ -5,6 +5,7 @@ calculation_parameters:
   device: cpu  # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
   model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
   double_precision: false  # Use double precision (float64) instead of single (float32). Default: false
+  restart_traj: false  # If true, continue from <initialxyzfilename>.dyn.restart if it exists; always saves last state
 
 general_parameters:
   temperature: 300.0  # Temperature in Kelvin
@@ -50,10 +51,15 @@ output_details:
   #   - "energies_0.out"
   #   - "energies_1.out"
   
+  track_variance: false  # If true, add a Var(eV^2) column to energies.out using the model's etot_ensemble_var.
+                        # Requires a FeNNol model that exposes 'etot_ensemble_var' in its auxiliary output.
+                        # Automatically disabled (with a warning) when batch_size > 1.
   summary_file: "summary.out"  # Output summary statistics file (requires save_summary in general_parameters)
 
-# Energy file format:
+# Energy file format (track_variance: false):
 #     Step   Time[fs]       Etot       Epot       Ekin    Temp[K]
+# Energy file format (track_variance: true, model supports etot_ensemble_var):
+#     Step   Time[fs]       Etot       Epot       Ekin    Temp[K]   Var(eV^2)
 # Where:
 #   Step: Integration step number
 #   Time[fs]: Time in femtoseconds
@@ -61,3 +67,4 @@ output_details:
 #   Epot: Potential energy (kcal/mol)
 #   Ekin: Kinetic energy (kcal/mol)
 #   Temp[K]: Temperature (Kelvin)
+#   Var(eV^2): Per-frame ensemble energy variance from model (eV^2); 'None' if model does not provide it.

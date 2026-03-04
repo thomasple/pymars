@@ -30,6 +30,23 @@ def main() -> None:
             model_dir = str(model_path.parent)
             os.environ['FENNOL_MODULES_PATH'] = model_dir
 
+    # --- Restart logic: determine restart file name ---
+    input_params = simulation_parameters.get("input_parameters", {})
+    initial_xyz = input_params.get("initial_geometry", None)
+    if initial_xyz is not None:
+        base_xyz = os.path.basename(initial_xyz)
+        restart_file_name = os.path.splitext(base_xyz)[0] + ".dyn.restart"
+    else:
+        restart_file_name = "traj.dyn.restart"
+    restart_traj = bool(calc_params.get("restart_traj", False))
+
+    # Determine restart file path: place the restart file next to the input YAML
+    input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
+    restart_file = os.path.join(input_yaml_dir, restart_file_name)
+    # Also show where we'll look/save restart files
+    # (useful when working directories or folder names change)
+    print(f"# Restart file will be: {restart_file}")
+
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
     # happens with the intended environment. See below where these imports
@@ -130,12 +147,37 @@ def main() -> None:
     system = initialize_collision_simulation(simulation_parameters)
 
     integrate = system["integrate"]
+    # Default: start from initial configuration
     coordinates = system["coordinates"]
     velocities = system["velocities"]
     accelerations = system["accelerations"]
     species = system["species"]
     masses = system["masses"]
     batch_size = system["batch_size"]
+    start_step = 0
+
+    # If restart_traj is true, try to locate a restart file. numpy.savez
+    # appends a .npz extension if it is not present, so check both
+    # '<prefix>.dyn.restart' and '<prefix>.dyn.restart.npz'.
+    if restart_traj:
+        candidates = [restart_file, restart_file + ".npz"]
+        found = None
+        for p in candidates:
+            if os.path.exists(p):
+                found = p
+                break
+        if found is not None:
+            print(f"# Restarting trajectory from {found}")
+            arr = np.load(found)
+            coordinates = arr["coordinates"]
+            velocities = arr["velocities"]
+            accelerations = arr["accelerations"]
+            if "step" in arr:
+                start_step = int(arr["step"])
+            else:
+                start_step = 0
+        else:
+            print(f"# restart_traj is True but no restart file found among: {candidates}; starting from initial configuration.")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -175,7 +217,7 @@ def main() -> None:
         else:
             num=len(str(batch_size-1))
             ftraj = [open(traj_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
-    
+
     # Get energy output file
     energy_file = output_params.get("energies_file", output_params.get("energy_output_file", None))
     if energy_file:
@@ -186,6 +228,9 @@ def main() -> None:
                 energy_files = [energy_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
         else:
             energy_files = energy_file
+
+    # Track variance option
+    track_variance = bool(output_params.get("track_variance", False))
 
     @jax.jit
     def mean_energies_and_remove_com(coordinates, velocities,epots):
@@ -224,15 +269,16 @@ def main() -> None:
     max_energy_drift = 0.0
     energy_history = []  # Store energy data for summary statistics
     
-    print(f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}")
-    for istep in range(n_steps):
-        coordinates, velocities, accelerations, energies, energy_data = integrate(
+    header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
+    print(header)
+    for istep in range(start_step, n_steps):
+        coordinates, velocities, accelerations, energies, energy_data, frame_variance = integrate(
             coordinates, velocities, accelerations,
             step=istep,
             energy_output_file=energy_files if energy_file else None,
             energy_steps=save_energy
         )
-        
+
         # Collect energy data for summary statistics
         if energy_data is not None:
             energy_history.append(energy_data)
@@ -243,7 +289,7 @@ def main() -> None:
             current_total_energy = np.mean(energy_data['total_energies'])
             drift = abs(current_total_energy - initial_total_energy)
             max_energy_drift = max(max_energy_drift, drift)
-        
+
         if (istep + 1) % save_steps == 0:
             time_elapsed = time.time() - time0
             time0 = time.time()
@@ -262,10 +308,10 @@ def main() -> None:
                 time_str = f"{time_fs:.0f}"
             else:
                 time_str = f"{time_fs:.{time_decimals}f}"
-            
-            print(
-                f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
-            )
+
+            line = f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
+            print(line)
+
             if write_traj:
                 coords = np.array(coordinates)
                 for i in range(batch_size):
@@ -345,6 +391,31 @@ def main() -> None:
     if write_traj:
         for f in ftraj: 
             f.close()
+    # --- Always save last state for restart ---
+    # Ensure directory exists (should, as it's input yaml dir)
+    try:
+        os.makedirs(os.path.dirname(restart_file), exist_ok=True)
+    except Exception:
+        pass
+    # Convert JAX arrays to numpy before saving to ensure compatibility
+    try:
+        save_coords = np.asarray(coordinates)
+        save_vels = np.asarray(velocities)
+        save_accs = np.asarray(accelerations)
+    except Exception:
+        save_coords = coordinates
+        save_vels = velocities
+        save_accs = accelerations
+
+    # Ensure we know the exact filename np.savez will create
+    restart_save_file = restart_file if restart_file.endswith(".npz") else restart_file + ".npz"
+    np.savez(restart_save_file,
+        coordinates=save_coords,
+        velocities=save_vels,
+        accelerations=save_accs,
+        step=n_steps
+    )
+    print(f"# Saved last state to {restart_save_file}")
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
     nsperday = (simulation_time / total_time)*60*60*24*us.NS

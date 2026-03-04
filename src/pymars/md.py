@@ -36,6 +36,11 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     projectile_params = simulation_parameters.get("projectile_parameters", {})
     calculation_params = simulation_parameters.get("calculation_parameters", {})
     dynamic_params = simulation_parameters.get("dynamic_parameters", {})
+    # Output options
+    output_params = simulation_parameters.get("output_details", {})
+    track_variance = bool(output_params.get("track_variance", False))
+    # Variance tracking requires batch_size==1 (model etot_ensemble_var is per-frame, not across trajectories)
+    # The guard below will be enforced after batch_size is known.
     
     # Support both nested and flat (legacy) formats
     # If nested sections don't exist, fall back to top-level keys
@@ -83,6 +88,15 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     # batch size for parallel simulations
     batch_size = general_params.get("batch_size", 1)
     assert batch_size >= 1, "batch_size must be at least 1"
+
+    # Batch-size guard for variance tracking
+    if track_variance and batch_size > 1:
+        print(
+            "# WARNING: track_variance is enabled but batch_size > 1. "
+            "etot_ensemble_var is a per-frame per-trajectory quantity and cannot be "
+            "meaningfully tracked across batch trajectories. Disabling track_variance."
+        )
+        track_variance = False
 
     # random rotation
     do_random_rotation = input_params.get("random_rotation", True)
@@ -176,7 +190,14 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             # full_coordinates expected shape (batch_size, N+1, 3) as jnp array
             coordinates_model = full_coordinates[:, 1:, :]
             projectile_coordinates = full_coordinates[:, 0, :]
-            energies_model, forces_model, _ = model._energy_and_forces(model.variables, conformation)
+            energies_model, forces_model, aux = model._energy_and_forces(model.variables, conformation)
+            # Extract per-frame ensemble variance if model provides it (units: eV^2, not converted).
+            # Always return a JAX array here so that JIT tracing is not broken when the key is absent.
+            if isinstance(aux, dict) and "etot_ensemble_var" in aux:
+                etot_ensemble_var = aux["etot_ensemble_var"]
+            else:
+                # Use NaN as a sentinel for "missing" ensemble variance; downstream code can detect this.
+                etot_ensemble_var = jnp.full_like(energies_model, jnp.nan)
             energies_repulsion, forces_repulsion, projectile_forces = (
                 repulsion_energies_and_forces(coordinates_model, projectile_coordinates)
             )
@@ -186,7 +207,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             full_forces = jnp.concatenate(
                 [projectile_forces[:, None, :], total_forces], axis=1
             )  # (batch_size,N+1,3)
-            return total_energies, full_forces
+            return total_energies, full_forces, etot_ensemble_var
 
         full_species = np.concatenate(
             [np.array([projectile_species], dtype=np.int32), species]
@@ -202,11 +223,13 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         def total_energies_and_forces(full_coordinates, conformation):
             # full_coordinates shape (batch_size, N, 3)
             coordinates_model = full_coordinates[:, :, :]
-            energies_model, forces_model, _ = model._energy_and_forces(model.variables, conformation)
+            energies_model, forces_model, aux = model._energy_and_forces(model.variables, conformation)
+            # Extract per-frame ensemble variance if model provides it (units: eV^2, not converted)
+            etot_ensemble_var = aux.get("etot_ensemble_var", None) if isinstance(aux, dict) else None
             total_energies = energies_model * energy_conv
             total_forces = forces_model.reshape(coordinates_model.shape[0], -1, 3) * energy_conv
             full_forces = total_forces  # (batch_size,N,3)
-            return total_energies, full_forces
+            return total_energies, full_forces, etot_ensemble_var
 
         full_species = species.copy()  # (N,)
         full_coordinates = coordinates.copy()  # (batch_size,N,3)
@@ -220,7 +243,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     conformation = model.preprocess(use_gpu=True, **initial_conformation)
     # Ensure full_coordinates passed as jnp arrays to energy/force function
     full_coordinates_jnp = jnp.array(full_coordinates, dtype=jnp.float32)
-    energies, forces = total_energies_and_forces(full_coordinates_jnp, conformation)
+    energies, forces, _ = total_energies_and_forces(full_coordinates_jnp, conformation)
     accelerations = forces / masses  # (batch_size, N(+1), 3) depending on collision
 
     # prepare integrator
@@ -237,10 +260,9 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         return coordinates, velocities
     
     @jax.jit
-    def integrate_part2(coordinates, velocities,conformation):
-        energies, forces = total_energies_and_forces(coordinates,conformation)
+    def integrate_part2(coordinates, velocities, conformation):
+        energies, forces, _var = total_energies_and_forces(coordinates, conformation)
         accelerations = forces / masses  # (batch_size,N+1,3)
-
         velocities = velocities + accelerations * dt2  # (batch_size,N,3)
         return velocities, accelerations, energies  # energies is (batch_size,)
 
@@ -249,7 +271,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         coordinates, velocities = integrate_part1(
             initial_coordinates, initial_velocities, accelerations
         )
-        
+
         # Update conformation for model preprocessing
         if collision:
             # For collision dynamics, exclude projectile (index 0)
@@ -257,24 +279,38 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         else:
             # For non-collision dynamics, use all coordinates
             coords_for_model = coordinates
-            
-        conformation = model.preprocess(use_gpu=True,**update_conformation(
+
+        conformation = model.preprocess(use_gpu=True, **update_conformation(
             initial_conformation, coords_for_model))
 
         velocities, accelerations, energies = integrate_part2(
-            coordinates, velocities,conformation
+            coordinates, velocities, conformation
         )
+
+        # Extract per-frame variance from model (outside jit) when requested.
+        # We obtain it every step when track_variance is True so the caller
+        # (main loop) can print it even if energy file is only written at a
+        # different interval.
+        frame_variance = None
+        if track_variance:
+            try:
+                _, _, aux_var = total_energies_and_forces(coordinates, conformation)
+                if aux_var is not None:
+                    frame_variance = np.atleast_1d(np.array(aux_var))
+            except Exception:
+                frame_variance = None
 
         # Write energy output if requested
         energy_data = None
         if energy_output_file is not None and step % energy_steps == 0:
             energy_data = write_energy_output(
-                energy_output_file, step, velocities, masses, energies, dt
+                energy_output_file, step, velocities, masses, energies, dt,
+                frame_variance=frame_variance
             )
 
-        return coordinates, velocities, accelerations, energies, energy_data
+        return coordinates, velocities, accelerations, energies, energy_data, frame_variance
 
-    def write_energy_output(output_file, step, velocities, masses, potential_energies, dt):
+    def write_energy_output(output_file, step, velocities, masses, potential_energies, dt, frame_variance=None):
         """Write energy data to output file in FeNNol format."""
         # Compute kinetic energy: 0.5 * m * v^2
         # masses is already shaped (1, N, 1) for broadcasting
@@ -295,26 +331,22 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         
         # Time in femtoseconds - determine precision based on dt
         time_fs = step * dt * 1000.0  # dt is in ps, convert to fs
-        # Determine decimal places: if dt=1.0 fs, show 0 decimals; if dt=0.1, show 1, etc.
         dt_fs = dt * 1000.0  # Convert dt from ps to fs
         if dt_fs >= 1.0:
             time_decimals = 0
         else:
-            # Count decimal places needed
             time_decimals = len(str(dt_fs).split('.')[-1].rstrip('0'))
         time_format = f"{{:.{time_decimals}f}}"
         
         # Convert JAX arrays to numpy for file writing
-        total_energies_np = np.array(total_energies)
-        potential_energies_np = np.array(potential_energies)
-        kinetic_energies_np = np.array(kinetic_energies)
-        temperatures_np = np.array(temperatures)
-        
-        # Ensure arrays are at least 1D for concatenation in summary statistics
-        total_energies_np = np.atleast_1d(total_energies_np)
-        potential_energies_np = np.atleast_1d(potential_energies_np)
-        kinetic_energies_np = np.atleast_1d(kinetic_energies_np)
-        temperatures_np = np.atleast_1d(temperatures_np)
+        total_energies_np = np.atleast_1d(np.array(total_energies))
+        potential_energies_np = np.atleast_1d(np.array(potential_energies))
+        kinetic_energies_np = np.atleast_1d(np.array(kinetic_energies))
+        temperatures_np = np.atleast_1d(np.array(temperatures))
+
+        # Normalise frame_variance: must be 1D numpy array of length batch_size, or None
+        if frame_variance is not None:
+            frame_variance = np.atleast_1d(np.array(frame_variance))
         
         # Write to file for each trajectory in batch
         for b in range(batch_size):
@@ -322,12 +354,16 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 file_path = output_file[b]
             else:
                 file_path = output_file if batch_size == 1 else f"{output_file}_{b}"
-            
+
             # Create file with header if step == 0
             if step == 0:
                 with open(file_path, 'w') as f:
-                    f.write(f"{'Step':>8s} {'Time[fs]':>12s} {'Etot':>12s} {'Epot':>12s} {'Ekin':>12s} {'Temp[K]':>10s}\n")
-            
+                    header = f"{'Step':>8s} {'Time[fs]':>12s} {'Etot':>12s} {'Epot':>12s} {'Ekin':>12s} {'Temp[K]':>10s}"
+                    if track_variance:
+                        header += f" {'Var(eV^2)':>12s}"
+                    header += "\n"
+                    f.write(header)
+
             # Append energy data
             with open(file_path, 'a') as f:
                 # Extract scalar values properly
@@ -335,19 +371,31 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 pot_e = float(potential_energies_np.flat[b] if potential_energies_np.size > 1 else potential_energies_np)
                 kin_e = float(kinetic_energies_np.flat[b] if kinetic_energies_np.size > 1 else kinetic_energies_np)
                 temp = float(temperatures_np.flat[b] if temperatures_np.size > 1 else temperatures_np)
-                
+
                 # Format time with appropriate precision
                 time_str = time_format.format(time_fs)
-                f.write(f"{step:8d} {time_str:>12s} {total_e:12.6f} "
-                       f"{pot_e:12.6f} {kin_e:12.6f} "
-                       f"{temp:10.2f}\n")
-        
+                line = f"{step:8d} {time_str:>12s} {total_e:12.6f} {pot_e:12.6f} {kin_e:12.6f} {temp:10.2f}"
+                if track_variance:
+                    # Use model-provided etot_ensemble_var (eV^2); write None if not available
+                    if frame_variance is not None:
+                        var_val = float(frame_variance.flat[b] if frame_variance.size > 1 else frame_variance[0])
+                        line += f" {var_val:12.5f}\n"
+                    else:
+                        line += f" {'None':>12s}\n"
+                else:
+                    line += "\n"
+                f.write(line)
+
         # Return energy data for summary statistics
+        # variances are from model (eV^2); None if not provided
+        var_arr = frame_variance  # already numpy or None
+
         return {
             'total_energies': total_energies_np,
             'potential_energies': potential_energies_np,
             'kinetic_energies': kinetic_energies_np,
-            'temperatures': temperatures_np
+            'temperatures': temperatures_np,
+            'variances': var_arr,
         }
 
     return {
