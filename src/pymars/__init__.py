@@ -271,7 +271,7 @@ def main() -> None:
     
     header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
     if track_variance:
-        header += f" {'Var':>12}"
+        header += f" {'Var(eV^2)':>12}"
     print(header)
     for istep in range(start_step, n_steps):
         coordinates, velocities, accelerations, energies, energy_data = integrate(
@@ -292,16 +292,15 @@ def main() -> None:
             drift = abs(current_total_energy - initial_total_energy)
             max_energy_drift = max(max_energy_drift, drift)
 
-        # Extract variance if requested and available
+        # Extract variance if requested and available — only from model-provided etot_ensemble_var
         variance_val = None
         if track_variance:
             # Try to get variance from energy_data or energies
-            if energy_data is not None and "variances" in energy_data:
-                variance_val = np.mean(energy_data["variances"])
-            elif hasattr(energies, "var"):
-                variance_val = float(np.var(energies))
-            else:
-                variance_val = 0.0
+            if energy_data is not None and "variances" in energy_data and energy_data["variances"] is not None:
+                try:
+                    variance_val = float(np.mean(energy_data["variances"]))
+                except Exception:
+                    variance_val = None
 
         if (istep + 1) % save_steps == 0:
             time_elapsed = time.time() - time0
@@ -324,7 +323,10 @@ def main() -> None:
 
             line = f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
             if track_variance:
-                line += f" {variance_val:12.5f}"
+                if variance_val is None:
+                    line += f" {'None':>12s}"
+                else:
+                    line += f" {variance_val:12.5f}"
             print(line)
 
             if write_traj:
