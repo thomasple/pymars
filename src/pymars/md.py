@@ -282,9 +282,12 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             coordinates, velocities, conformation
         )
 
-        # Extract per-frame variance from model (outside jit, only when needed)
+        # Extract per-frame variance from model (outside jit) when requested.
+        # We obtain it every step when track_variance is True so the caller
+        # (main loop) can print it even if energy file is only written at a
+        # different interval.
         frame_variance = None
-        if track_variance and energy_output_file is not None and step % energy_steps == 0:
+        if track_variance:
             try:
                 _, _, aux_var = total_energies_and_forces(coordinates, conformation)
                 if aux_var is not None:
@@ -300,7 +303,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 frame_variance=frame_variance
             )
 
-        return coordinates, velocities, accelerations, energies, energy_data
+        return coordinates, velocities, accelerations, energies, energy_data, frame_variance
 
     def write_energy_output(output_file, step, velocities, masses, potential_energies, dt, frame_variance=None):
         """Write energy data to output file in FeNNol format."""
