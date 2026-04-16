@@ -545,6 +545,7 @@ def main() -> None:
     start_sim = (max(existing) + 1) if existing else 0
     if existing:
         #print(f"# [BATCH_DEBUG] existing SIM indices: {sorted(existing)}")
+        pass
     else:
         #print("# [BATCH_DEBUG] no existing SIM dirs found; starting at SIM00000")
         pass
