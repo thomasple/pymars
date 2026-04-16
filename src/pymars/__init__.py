@@ -235,16 +235,17 @@ def main() -> None:
         else:
             energy_files = energy_file
     
-    # Get energy summary file
-    summary_file = output_params.get("summary_file", None)
-    if summary_file:
-        if isinstance(summary_file, str):
+    # Get summary output file(s)
+    summary_cfg = output_params.get("summary_file", None)
+    summary_files = None
+    if summary_cfg:
+        if isinstance(summary_cfg, str):
             if batch_size == 1:
-                summary_files = [summary_file]
+                summary_files = [summary_cfg]
             else:
-                summary_files = [summary_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
-        else:
-            summary_files = summary_file
+                summary_files = [summary_cfg.replace(".out", f"_{i}.out") for i in range(batch_size)]
+        elif isinstance(summary_cfg, list):
+            summary_files = summary_cfg
 
     # Track variance option
     track_variance = bool(output_params.get("track_variance", False))
@@ -278,12 +279,19 @@ def main() -> None:
     thermostat_params = simulation_parameters.get("thermostat_parameters", simulation_parameters)
     is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
     
-    # Prepare summary file if requested
-    summary_file = output_params.get("summary_file", "summary.out") if save_summary else None
+    # Prepare summary file(s) if requested
+    if save_summary is None:
+        summary_files = None
+    elif summary_files is None:
+        # default fallback when save_summary is set but no summary_file provided
+        if batch_size == 1:
+            summary_files = ["summary.out"]
+        else:
+            summary_files = [f"summary_{i}.out" for i in range(batch_size)]
     
     # Energy tracking for summary and drift calculation
     initial_total_energy = None
-    max_energy_drift = 0.0
+    max_energy_drift = None
     energy_history = []  # Store energy data for summary statistics
     
     header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
@@ -301,13 +309,14 @@ def main() -> None:
         # Collect energy data for summary statistics
         if energy_data is not None:
             energy_history.append(energy_data)
-            # Set initial energy for drift calculation
+            # Set initial energies for drift calculation (per-trajectory)
+            current_total = np.atleast_1d(np.asarray(energy_data['total_energies'], dtype=float))
             if initial_total_energy is None:
-                initial_total_energy = np.mean(energy_data['total_energies'])
-            # Track maximum energy drift
-            current_total_energy = np.mean(energy_data['total_energies'])
-            drift = abs(current_total_energy - initial_total_energy)
-            max_energy_drift = max(max_energy_drift, drift)
+                initial_total_energy = current_total.copy()
+                max_energy_drift = np.zeros_like(current_total, dtype=float)
+            # Track maximum energy drift per trajectory
+            drift = np.abs(current_total - initial_total_energy)
+            max_energy_drift = np.maximum(max_energy_drift, drift)
 
         if (istep + 1) % save_steps == 0:
             time_elapsed = time.time() - time0
@@ -343,30 +352,16 @@ def main() -> None:
                     )
         
         # Write summary output if requested
-        if save_summary is not None and summary_file is not None and (istep + 1) % save_summary == 0:
+        if save_summary is not None and summary_files is not None and (istep + 1) % save_summary == 0:
             from fennol.utils.io import human_time_duration
             
             # Calculate statistics over the summary interval
             n_summary_steps = len(energy_history)
             if n_summary_steps > 0:
-                # Aggregate energy data
-                all_etot = np.concatenate([e['total_energies'] for e in energy_history])
-                all_epot = np.concatenate([e['potential_energies'] for e in energy_history])
-                all_ekin = np.concatenate([e['kinetic_energies'] for e in energy_history])
-                all_temp = np.concatenate([e['temperatures'] for e in energy_history])
-                
-                # Calculate averages and standard deviations
-                avg_etot = np.mean(all_etot)
-                std_etot = np.std(all_etot)
-                avg_epot = np.mean(all_epot)
-                std_epot = np.std(all_epot)
-                avg_ekin = np.mean(all_ekin)
-                std_ekin = np.std(all_ekin)
-                avg_temp = np.mean(all_temp)
-                std_temp = np.std(all_temp)
-                
-                # Calculate energy drift percentage
-                drift_percent = (max_energy_drift / abs(initial_total_energy)) * 100.0 if initial_total_energy != 0 else 0.0
+                def _extract_traj_val(entry, key, b):
+                    arr = np.atleast_1d(np.asarray(entry[key], dtype=float))
+                    idx = b if b < arr.size else arr.size - 1
+                    return arr[idx]
                 
                 # Time statistics
                 time_for_interval = time.time() - time0
@@ -383,26 +378,47 @@ def main() -> None:
                 est_remaining_time = remaining_steps * (total_elapsed_time / (istep + 1))
                 est_total_duration = total_elapsed_time + est_remaining_time
                 
-                # Write summary to file
-                with open(summary_file, 'a') as f:
-                    f.write("##################################################\n")
-                    f.write(f"# Step {istep+1:_} of {n_steps:_}  ({((istep+1)/n_steps*100):.3f} %)\n")
-                    f.write(f"# Simulated time      : {simulated_time_ps:.3f} ps\n")
-                    f.write(f"# Tot. Simu. time     : {total_simulated_time_ps:.3f} ps\n")
-                    f.write(f"# Tot. elapsed time   : {human_time_duration(total_elapsed_time)}\n")
-                    f.write(f"# Avg. calc. speed: {avg_ns_per_day:.2f} ns/day  ( {avg_step_per_s:.2f} step/s )\n")
-                    f.write(f"# Est. total duration   : {human_time_duration(est_total_duration)}\n")
-                    f.write(f"# Est. remaining time : {human_time_duration(est_remaining_time)}\n")
-                    f.write(f"# Time for {save_summary:_} steps : {human_time_duration(time_for_interval)}\n")
-                    # Only show energy drift for NVE simulations
-                    if is_nve:
-                        f.write(f"# Maximum energy drift (NVE): {max_energy_drift:.2f} kcal/mol ({drift_percent:.1f}%)\n")
-                    f.write(f"# Averages over last {n_summary_steps * save_energy:_} steps :\n")
-                    f.write(f"#   Etot       : {avg_etot:11.2f}   +/- {std_etot:9.3f}  kcal/mol\n")
-                    f.write(f"#   Epot       : {avg_epot:11.2f}   +/- {std_epot:9.2f}  kcal/mol\n")
-                    f.write(f"#   Ekin       : {avg_ekin:11.3f}   +/- {std_ekin:9.2f}  kcal/mol\n")
-                    f.write(f"#   Temper     : {avg_temp:11.1f}   +/- {std_temp:9.0f}  Kelvin\n")
-                    f.write("##################################################\n\n")
+                for b in range(batch_size):
+                    if b >= len(summary_files):
+                        continue
+
+                    all_etot = np.array([_extract_traj_val(e, 'total_energies', b) for e in energy_history], dtype=float)
+                    all_epot = np.array([_extract_traj_val(e, 'potential_energies', b) for e in energy_history], dtype=float)
+                    all_ekin = np.array([_extract_traj_val(e, 'kinetic_energies', b) for e in energy_history], dtype=float)
+                    all_temp = np.array([_extract_traj_val(e, 'temperatures', b) for e in energy_history], dtype=float)
+
+                    avg_etot = np.mean(all_etot)
+                    std_etot = np.std(all_etot)
+                    avg_epot = np.mean(all_epot)
+                    std_epot = np.std(all_epot)
+                    avg_ekin = np.mean(all_ekin)
+                    std_ekin = np.std(all_ekin)
+                    avg_temp = np.mean(all_temp)
+                    std_temp = np.std(all_temp)
+
+                    drift_percent = 0.0
+                    if initial_total_energy is not None and b < len(initial_total_energy) and initial_total_energy[b] != 0:
+                        drift_percent = (max_energy_drift[b] / abs(initial_total_energy[b])) * 100.0
+
+                    with open(summary_files[b], 'a') as f:
+                        f.write("##################################################\n")
+                        f.write(f"# Step {istep+1:_} of {n_steps:_}  ({((istep+1)/n_steps*100):.3f} %)\n")
+                        f.write(f"# Simulated time      : {simulated_time_ps:.3f} ps\n")
+                        f.write(f"# Tot. Simu. time     : {total_simulated_time_ps:.3f} ps\n")
+                        f.write(f"# Tot. elapsed time   : {human_time_duration(total_elapsed_time)}\n")
+                        f.write(f"# Avg. calc. speed: {avg_ns_per_day:.2f} ns/day  ( {avg_step_per_s:.2f} step/s )\n")
+                        f.write(f"# Est. total duration   : {human_time_duration(est_total_duration)}\n")
+                        f.write(f"# Est. remaining time : {human_time_duration(est_remaining_time)}\n")
+                        f.write(f"# Time for {save_summary:_} steps : {human_time_duration(time_for_interval)}\n")
+                        # Only show energy drift for NVE simulations
+                        if is_nve:
+                            f.write(f"# Maximum energy drift (NVE): {max_energy_drift[b]:.2f} kcal/mol ({drift_percent:.1f}%)\n")
+                        f.write(f"# Averages over last {n_summary_steps * save_energy:_} steps :\n")
+                        f.write(f"#   Etot       : {avg_etot:11.2f}   +/- {std_etot:9.3f}  kcal/mol\n")
+                        f.write(f"#   Epot       : {avg_epot:11.2f}   +/- {std_epot:9.2f}  kcal/mol\n")
+                        f.write(f"#   Ekin       : {avg_ekin:11.3f}   +/- {std_ekin:9.2f}  kcal/mol\n")
+                        f.write(f"#   Temper     : {avg_temp:11.1f}   +/- {std_temp:9.0f}  Kelvin\n")
+                        f.write("##################################################\n\n")
                 
                 # Clear energy history for next interval
                 energy_history.clear()
@@ -442,7 +458,7 @@ def main() -> None:
     print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
 
     # ------------------------------------------------------------------ #
-    # Batch artifact export: copy per-trajectory outputs into SIMXXXXX dirs
+    # Batch artifact export: move per-trajectory outputs into SIMXXXXX dirs
     # ------------------------------------------------------------------ #
     print(f"# [BATCH_DEBUG] Entering batch artifact export phase (batch_size={batch_size})")
     if batch_size <= 1:
@@ -462,14 +478,29 @@ def main() -> None:
             return os.path.abspath(path_str)
         return None
 
+    def _move_if_exists(src_path, dst_dir, dst_name=None):
+        if src_path is None:
+            print(f"# [BATCH_DEBUG] move skipped (source is None) -> dst_dir={dst_dir}")
+            return
+        if os.path.isfile(src_path):
+            target_name = dst_name if dst_name else os.path.basename(src_path)
+            target_path = os.path.join(dst_dir, target_name)
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            shutil.move(src_path, target_path)
+            print(f"# [BATCH_DEBUG] moved '{src_path}' -> '{target_path}'")
+        else:
+            print(f"# Warning: expected file not found, skipping move: {src_path}")
+
     def _copy_if_exists(src_path, dst_dir, dst_name=None):
         if src_path is None:
             print(f"# [BATCH_DEBUG] copy skipped (source is None) -> dst_dir={dst_dir}")
             return
         if os.path.isfile(src_path):
             target_name = dst_name if dst_name else os.path.basename(src_path)
-            shutil.copy2(src_path, os.path.join(dst_dir, target_name))
-            print(f"# [BATCH_DEBUG] copied '{src_path}' -> '{os.path.join(dst_dir, target_name)}'")
+            target_path = os.path.join(dst_dir, target_name)
+            shutil.copy2(src_path, target_path)
+            print(f"# [BATCH_DEBUG] copied '{src_path}' -> '{target_path}'")
         else:
             print(f"# Warning: expected file not found, skipping copy: {src_path}")
 
@@ -505,9 +536,9 @@ def main() -> None:
         )
     print(f"# [BATCH_DEBUG] initial geometry resolved to: {initial_geom_abs}")
 
-    # summary source(s): if list provided use per-index, otherwise same file for all
+    # summary source(s): per-trajectory summary outputs
     per_summary_sources = None
-    if 'summary_files' in locals() and isinstance(summary_files, list):
+    if isinstance(summary_files, list):
         per_summary_sources = summary_files
     print(f"# [BATCH_DEBUG] per_summary_sources: {per_summary_sources}")
 
@@ -517,8 +548,8 @@ def main() -> None:
         energy_dst_name = os.path.basename(energy_file)
     else:
         energy_dst_name = None
-    if isinstance(summary_file, str):
-        summary_dst_name = os.path.basename(summary_file)
+    if isinstance(summary_cfg, str):
+        summary_dst_name = os.path.basename(summary_cfg)
     else:
         summary_dst_name = None
     print(
@@ -530,28 +561,22 @@ def main() -> None:
         print(f"# [BATCH_DEBUG] processing trajectory index {i} for '{sim_dir}'")
         # Per-trajectory trajectory file
         if write_traj and i < len(traj_paths):
-            _copy_if_exists(os.path.abspath(traj_paths[i]), sim_dir, traj_dst_name)
+            _move_if_exists(os.path.abspath(traj_paths[i]), sim_dir, traj_dst_name)
 
         # Per-trajectory energy file
         if energy_file and i < len(energy_files):
             if energy_dst_name:
-                _copy_if_exists(os.path.abspath(energy_files[i]), sim_dir, energy_dst_name)
+                _move_if_exists(os.path.abspath(energy_files[i]), sim_dir, energy_dst_name)
             else:
                 # If a list of custom names is provided, keep source basename
-                _copy_if_exists(os.path.abspath(energy_files[i]), sim_dir)
+                _move_if_exists(os.path.abspath(energy_files[i]), sim_dir)
 
         # Summary file (global or per-trajectory list if available)
-        if summary_file:
-            if per_summary_sources is not None and i < len(per_summary_sources):
-                if summary_dst_name:
-                    _copy_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir, summary_dst_name)
-                else:
-                    _copy_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir)
+        if per_summary_sources is not None and i < len(per_summary_sources):
+            if summary_dst_name:
+                _move_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir, summary_dst_name)
             else:
-                if summary_dst_name:
-                    _copy_if_exists(os.path.abspath(summary_file), sim_dir, summary_dst_name)
-                else:
-                    _copy_if_exists(os.path.abspath(summary_file), sim_dir)
+                _move_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir)
 
         # Always copy input YAML and starting geometry if available
         _copy_if_exists(input_file_abs, sim_dir)
