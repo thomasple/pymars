@@ -3,6 +3,8 @@ import yaml
 import numpy as np
 import os
 import time
+import re
+import shutil
 
 
 __all__ = []
@@ -208,18 +210,22 @@ def main() -> None:
     save_energy = general_params.get("save_energy", general_params.get("energy_steps", 100))
     
     traj_file = str(output_params.get("trajectory_file", output_params.get("traj_file", "trajectory.xyz")))
+    traj_paths = []
     write_traj = traj_file.lower() != "none"
     if write_traj:
         assert traj_file.endswith(".xyz"), "Only .xyz output format is supported currently."
         from fennol.utils.io import write_xyz_frame
         if batch_size ==1:
-            ftraj = [open(traj_file, "w")]
+            traj_paths = [traj_file]
+            ftraj = [open(traj_paths[0], "w")]
         else:
             num=len(str(batch_size-1))
-            ftraj = [open(traj_file.replace(".xyz",f'.{i:0{num}}.xyz'), "w") for i in range(batch_size)]
+            traj_paths = [traj_file.replace(".xyz", f'.{i:0{num}}.xyz') for i in range(batch_size)]
+            ftraj = [open(p, "w") for p in traj_paths]
 
     # Get energy output file
     energy_file = output_params.get("energies_file", output_params.get("energy_output_file", None))
+    energy_files = []
     if energy_file:
         if isinstance(energy_file, str):
             if batch_size == 1:
@@ -228,6 +234,17 @@ def main() -> None:
                 energy_files = [energy_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
         else:
             energy_files = energy_file
+    
+    # Get energy summary file
+    summary_file = output_params.get("summary_file", None)
+    if summary_file:
+        if isinstance(summary_file, str):
+            if batch_size == 1:
+                summary_files = [summary_file]
+            else:
+                summary_files = [summary_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
+        else:
+            summary_files = summary_file
 
     # Track variance option
     track_variance = bool(output_params.get("track_variance", False))
@@ -420,6 +437,106 @@ def main() -> None:
     total_time = time.time() - time_start
     nsperday = (simulation_time / total_time)*60*60*24*us.NS
     print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
+
+    # ------------------------------------------------------------------ #
+    # Batch artifact export: copy per-trajectory outputs into SIMXXXXX dirs
+    # ------------------------------------------------------------------ #
+    def _resolve_existing_path(path_str, bases):
+        if path_str is None:
+            return None
+        if os.path.isabs(path_str) and os.path.exists(path_str):
+            return path_str
+        for b in bases:
+            cand = os.path.join(b, path_str)
+            if os.path.exists(cand):
+                return cand
+        if os.path.exists(path_str):
+            return os.path.abspath(path_str)
+        return None
+
+    def _copy_if_exists(src_path, dst_dir, dst_name=None):
+        if src_path is None:
+            return
+        if os.path.isfile(src_path):
+            target_name = dst_name if dst_name else os.path.basename(src_path)
+            shutil.copy2(src_path, os.path.join(dst_dir, target_name))
+        else:
+            print(f"# Warning: expected file not found, skipping copy: {src_path}")
+
+    sim_root = os.getcwd()
+    existing = []
+    for name in os.listdir(sim_root):
+        m = re.fullmatch(r"SIM(\d{5})", name)
+        if m and os.path.isdir(os.path.join(sim_root, name)):
+            existing.append(int(m.group(1)))
+    start_sim = (max(existing) + 1) if existing else 0
+
+    sim_dirs = []
+    for i in range(batch_size):
+        dname = f"SIM{start_sim + i:05d}"
+        dpath = os.path.join(sim_root, dname)
+        os.makedirs(dpath, exist_ok=True)
+        sim_dirs.append(dpath)
+
+    input_file_abs = os.path.abspath(args.input_file)
+    initial_geom_abs = None
+    if isinstance(initial_xyz, str):
+        initial_geom_abs = _resolve_existing_path(
+            initial_xyz,
+            [input_yaml_dir, os.getcwd()]
+        )
+
+    # summary source(s): if list provided use per-index, otherwise same file for all
+    per_summary_sources = None
+    if 'summary_files' in locals() and isinstance(summary_files, list):
+        per_summary_sources = summary_files
+
+    # Destination base names (no _i suffix) for files copied into SIMXXXXX dirs
+    traj_dst_name = os.path.basename(traj_file) if write_traj else None
+    if isinstance(energy_file, str):
+        energy_dst_name = os.path.basename(energy_file)
+    else:
+        energy_dst_name = None
+    if isinstance(summary_file, str):
+        summary_dst_name = os.path.basename(summary_file)
+    else:
+        summary_dst_name = None
+
+    for i, sim_dir in enumerate(sim_dirs):
+        # Per-trajectory trajectory file
+        if write_traj and i < len(traj_paths):
+            _copy_if_exists(os.path.abspath(traj_paths[i]), sim_dir, traj_dst_name)
+
+        # Per-trajectory energy file
+        if energy_file and i < len(energy_files):
+            if energy_dst_name:
+                _copy_if_exists(os.path.abspath(energy_files[i]), sim_dir, energy_dst_name)
+            else:
+                # If a list of custom names is provided, keep source basename
+                _copy_if_exists(os.path.abspath(energy_files[i]), sim_dir)
+
+        # Summary file (global or per-trajectory list if available)
+        if summary_file:
+            if per_summary_sources is not None and i < len(per_summary_sources):
+                if summary_dst_name:
+                    _copy_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir, summary_dst_name)
+                else:
+                    _copy_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir)
+            else:
+                if summary_dst_name:
+                    _copy_if_exists(os.path.abspath(summary_file), sim_dir, summary_dst_name)
+                else:
+                    _copy_if_exists(os.path.abspath(summary_file), sim_dir)
+
+        # Always copy input YAML and starting geometry if available
+        _copy_if_exists(input_file_abs, sim_dir)
+        _copy_if_exists(initial_geom_abs, sim_dir)
+
+    if batch_size > 0:
+        print(
+            f"# Exported batch artifacts into {batch_size} simulation folder(s): "
+            f"SIM{start_sim:05d}..SIM{start_sim + batch_size - 1:05d}"
+        )
 
 
 if __name__ == "__main__":
