@@ -45,16 +45,20 @@ output_details:
   #   - "trajectory_0.xyz"
   #   - "trajectory_1.xyz"
   
-  energies_file: "energies.out"  # Output energy file
+  energies_file: "energies.out"  # Output energy file (recommended to use .out extension)
   # For batch simulations, you can provide a list:
   # energies_file:
   #   - "energies_0.out"
   #   - "energies_1.out"
+  # If a single name is provided and batch_size > 1, pymars auto-generates per-trajectory
+  # names by inserting _i before the extension using splitext (e.g., energies.out -> energies_0.out).
   
   track_variance: false  # If true, add a Var(eV^2) column to energies.out using the model's etot_ensemble_var.
                         # Requires a FeNNol model that exposes 'etot_ensemble_var' in its auxiliary output.
                         # Automatically disabled (with a warning) when batch_size > 1.
-  summary_file: "summary.out"  # Output summary statistics file (requires save_summary in general_parameters)
+  summary_file: "summary.out"  # Output summary statistics file (recommended to use .out extension)
+                                # For batch_size > 1, per-trajectory files are auto-generated
+                                # (summary.out -> summary_0.out, summary_1.out, ...).
 
 # Energy file format (track_variance: false):
 #     Step   Time[fs]       Etot       Epot       Ekin    Temp[K]

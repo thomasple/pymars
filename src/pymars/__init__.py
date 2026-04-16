@@ -223,8 +223,22 @@ def main() -> None:
             traj_paths = [traj_file.replace(".xyz", f'.{i:0{num}}.xyz') for i in range(batch_size)]
             ftraj = [open(p, "w") for p in traj_paths]
 
-    # Get energy output file (per-trajectory energy files for batch mode)
-    # For batch_size > 1, energy outputs are named with _0, _1, ... suffixes to separate per-trajectory data
+    def _indexed_paths(base_path, n):
+        """Return n unique per-trajectory paths by injecting _i before extension.
+
+        Uses os.path.splitext so naming works even when ".out" is missing or appears
+        in the middle of the filename.
+        Examples:
+          - energies.out -> energies_0.out, energies_1.out
+          - energies     -> energies_0, energies_1
+          - my.out.file  -> my.out_0.file, my.out_1.file
+        """
+        root, ext = os.path.splitext(base_path)
+        return [f"{root}_{i}{ext}" for i in range(n)]
+
+    # Get energy output file(s)
+    # For batch_size > 1 and a single configured filename, generate per-trajectory
+    # unique files by injecting _i before the extension via splitext.
     energy_file = output_params.get("energies_file", output_params.get("energy_output_file", None))
     energy_files = []
     if energy_file:
@@ -232,14 +246,26 @@ def main() -> None:
             if batch_size == 1:
                 energy_files = [energy_file]
             else:
-                # Create per-trajectory energy filenames: energies.out -> energies_0.out, energies_1.out, ...
-                energy_files = [energy_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
+                energy_files = _indexed_paths(energy_file, batch_size)
+        elif isinstance(energy_file, (list, tuple)):
+            # Explicit per-trajectory files provided by user.
+            energy_files = list(energy_file)
         else:
-            energy_files = energy_file
-    
-    # Summary file setup: per-trajectory summary filenames for batch mode statistics
-    # When batch_size > 1, each trajectory gets its own summary file (summary_0.out, summary_1.out, ...)
-    # This enables independent tracking of energy drift, temperature, and performance per trajectory
+            raise TypeError(
+                "output_details.energies_file must be either a string or a list/tuple of strings"
+            )
+
+        # Validate list length early to avoid runtime IndexError in md.write_energy_output
+        # (which indexes output_file[b] for b in range(batch_size)).
+        if len(energy_files) != batch_size:
+            raise ValueError(
+                f"output_details.energies_file defines {len(energy_files)} file(s) "
+                f"but batch_size is {batch_size}. Provide exactly one energy file per trajectory."
+            )
+            
+
+    # Summary file setup: one summary file per trajectory in batch mode.
+    # Uses the same splitext-safe indexing logic as energy files.
     summary_cfg = output_params.get("summary_file", None)
     summary_files = None
     if summary_cfg:
@@ -249,10 +275,21 @@ def main() -> None:
                 summary_files = [summary_cfg]
             else:
                 # Multiple trajectories: append _i suffix to create separate summary per trajectory
-                summary_files = [summary_cfg.replace(".out", f"_{i}.out") for i in range(batch_size)]
-        elif isinstance(summary_cfg, list):
+                summary_files = _indexed_paths(summary_cfg, batch_size)
+        elif isinstance(summary_cfg, (list, tuple)):
             # User provided explicit list of summary filenames (one per trajectory)
-            summary_files = summary_cfg
+            summary_files = list(summary_cfg)
+        else:
+            raise TypeError(
+                "output_details.summary_file must be either a string or a list/tuple of strings"
+            )
+
+        # Validate list length early to avoid downstream indexing mismatches.
+        if len(summary_files) != batch_size:
+            raise ValueError(
+                f"output_details.summary_file defines {len(summary_files)} file(s) "
+                f"but batch_size is {batch_size}. Provide exactly one summary file per trajectory."
+            )
 
     # Track variance option
     track_variance = bool(output_params.get("track_variance", False))
@@ -591,7 +628,7 @@ def main() -> None:
     else:
         summary_dst_name = None
     print(
-        f"# [BATCH_DEBUG] destination base names -> "
+    #    f"# [BATCH_DEBUG] destination base names -> "
         f"traj: {traj_dst_name}, energy: {energy_dst_name}, summary: {summary_dst_name}"
     )
 

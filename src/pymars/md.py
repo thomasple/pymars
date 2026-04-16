@@ -260,8 +260,12 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             # Compute ML potential energy and forces from model
             energies_model, forces_model, aux = model._energy_and_forces(model.variables, conformation)
             
-            # Extract per-frame ensemble variance if model provides it (units: eV^2)
-            etot_ensemble_var = aux.get("etot_ensemble_var", None) if isinstance(aux, dict) else None
+            # Extract per-frame ensemble variance if model provides it (units: eV^2).
+            # Always return a JAX array sentinel when missing so JIT tracing remains stable.
+            if isinstance(aux, dict) and "etot_ensemble_var" in aux:
+                etot_ensemble_var = aux["etot_ensemble_var"]
+            else:
+                etot_ensemble_var = jnp.full_like(energies_model, jnp.nan)
             
             # Total energy and forces (no repulsion in non-collision mode)
             total_energies = energies_model * energy_conv
