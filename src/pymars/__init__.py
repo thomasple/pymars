@@ -485,9 +485,9 @@ def main() -> None:
     # plus copies of the input configuration (input.yaml, starting geometry)
     # This structure enables easy tracking and comparison of multiple parallel simulations
     
-    print(f"# [BATCH_DEBUG] Entering batch artifact export phase (batch_size={batch_size})")
+    #print(f"# [BATCH_DEBUG] Entering batch artifact export phase (batch_size={batch_size})")
     if batch_size <= 1:
-        print("# [BATCH_DEBUG] batch_size <= 1, skipping SIM export logic")
+        #print("# [BATCH_DEBUG] batch_size <= 1, skipping SIM export logic")
         return
 
     def _resolve_existing_path(path_str, bases):
@@ -507,7 +507,7 @@ def main() -> None:
     def _move_if_exists(src_path, dst_dir, dst_name=None):
         """Move a file from src_path to dst_dir, optionally renaming to dst_name. Overwrites existing target."""
         if src_path is None:
-            print(f"# [BATCH_DEBUG] move skipped (source is None) -> dst_dir={dst_dir}")
+            #print(f"# [BATCH_DEBUG] move skipped (source is None) -> dst_dir={dst_dir}")
             return
         if os.path.isfile(src_path):
             target_name = dst_name if dst_name else os.path.basename(src_path)
@@ -516,26 +516,26 @@ def main() -> None:
             if os.path.exists(target_path):
                 os.remove(target_path)
             shutil.move(src_path, target_path)
-            print(f"# [BATCH_DEBUG] moved '{src_path}' -> '{target_path}'")
+            #print(f"# [BATCH_DEBUG] moved '{src_path}' -> '{target_path}'")
         else:
             print(f"# Warning: expected file not found, skipping move: {src_path}")
 
     def _copy_if_exists(src_path, dst_dir, dst_name=None):
         """Copy a file from src_path to dst_dir, optionally renaming to dst_name."""
         if src_path is None:
-            print(f"# [BATCH_DEBUG] copy skipped (source is None) -> dst_dir={dst_dir}")
+            #print(f"# [BATCH_DEBUG] copy skipped (source is None) -> dst_dir={dst_dir}")
             return
         if os.path.isfile(src_path):
             target_name = dst_name if dst_name else os.path.basename(src_path)
             target_path = os.path.join(dst_dir, target_name)
             shutil.copy2(src_path, target_path)
-            print(f"# [BATCH_DEBUG] copied '{src_path}' -> '{target_path}'")
+            #print(f"# [BATCH_DEBUG] copied '{src_path}' -> '{target_path}'")
         else:
             print(f"# Warning: expected file not found, skipping copy: {src_path}")
 
     # Scan existing SIMXXXXX folders and allocate new sequential indices
     sim_root = os.getcwd()
-    print(f"# [BATCH_DEBUG] scanning existing SIM dirs in: {sim_root}")
+    #print(f"# [BATCH_DEBUG] scanning existing SIM dirs in: {sim_root}")
     existing = []
     for name in os.listdir(sim_root):
         m = re.fullmatch(r"SIM(\d{5})", name)
@@ -544,10 +544,11 @@ def main() -> None:
     # Allocate next batch: if folders exist, start after the highest; else start at 0
     start_sim = (max(existing) + 1) if existing else 0
     if existing:
-        print(f"# [BATCH_DEBUG] existing SIM indices: {sorted(existing)}")
+        #print(f"# [BATCH_DEBUG] existing SIM indices: {sorted(existing)}")
     else:
-        print("# [BATCH_DEBUG] no existing SIM dirs found; starting at SIM00000")
-    print(f"# [BATCH_DEBUG] allocated start index: {start_sim:05d}")
+        #print("# [BATCH_DEBUG] no existing SIM dirs found; starting at SIM00000")
+        pass
+    #print(f"# [BATCH_DEBUG] allocated start index: {start_sim:05d}")
 
     # Create SIM folders for this batch (batch_size of them)
     sim_dirs = []
@@ -556,11 +557,11 @@ def main() -> None:
         dpath = os.path.join(sim_root, dname)
         os.makedirs(dpath, exist_ok=True)
         sim_dirs.append(dpath)
-    print(f"# [BATCH_DEBUG] created/verified SIM dirs: {[os.path.basename(d) for d in sim_dirs]}")
+    #print(f"# [BATCH_DEBUG] created/verified SIM dirs: {[os.path.basename(d) for d in sim_dirs]}")
 
     # Resolve paths to input files (initial geometry, input YAML) for copying
     input_file_abs = os.path.abspath(args.input_file)
-    print(f"# [BATCH_DEBUG] input file resolved to: {input_file_abs}")
+    #print(f"# [BATCH_DEBUG] input file resolved to: {input_file_abs}")
     initial_geom_abs = None
     if isinstance(initial_xyz, str):
         # Try to resolve initial geometry file in input dir or current dir
@@ -568,14 +569,14 @@ def main() -> None:
             initial_xyz,
             [input_yaml_dir, os.getcwd()]
         )
-    print(f"# [BATCH_DEBUG] initial geometry resolved to: {initial_geom_abs}")
+    #print(f"# [BATCH_DEBUG] initial geometry resolved to: {initial_geom_abs}")
 
     # Prepare per-trajectory summary file sources (per-trajectory summary files from main run)
     per_summary_sources = None
     if isinstance(summary_files, list):
         # summary_files contains the actual per-trajectory summary output files
         per_summary_sources = summary_files
-    print(f"# [BATCH_DEBUG] per_summary_sources: {per_summary_sources}")
+    #print(f"# [BATCH_DEBUG] per_summary_sources: {per_summary_sources}")
 
     # Destination base names: files copied into SIM folders are renamed to configured base names (no _i suffix)
     # This makes each SIM folder independent and self-contained
@@ -595,7 +596,7 @@ def main() -> None:
 
     # Move/copy per-trajectory outputs into their respective SIM folders
     for i, sim_dir in enumerate(sim_dirs):
-        print(f"# [BATCH_DEBUG] processing trajectory index {i} for '{sim_dir}'")
+        #print(f"# [BATCH_DEBUG] processing trajectory index {i} for '{sim_dir}'")
         
         # Move trajectory file (generated output with _i suffix) -> destination with base name
         if write_traj and i < len(traj_paths):
@@ -626,7 +627,7 @@ def main() -> None:
             f"# Exported batch artifacts into {batch_size} simulation folder(s): "
             f"SIM{start_sim:05d}..SIM{start_sim + batch_size - 1:05d}"
         )
-        print("# [BATCH_DEBUG] batch artifact export phase completed")
+        #print("# [BATCH_DEBUG] batch artifact export phase completed")
 
 
 if __name__ == "__main__":
