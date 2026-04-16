@@ -223,7 +223,8 @@ def main() -> None:
             traj_paths = [traj_file.replace(".xyz", f'.{i:0{num}}.xyz') for i in range(batch_size)]
             ftraj = [open(p, "w") for p in traj_paths]
 
-    # Get energy output file
+    # Get energy output file (per-trajectory energy files for batch mode)
+    # For batch_size > 1, energy outputs are named with _0, _1, ... suffixes to separate per-trajectory data
     energy_file = output_params.get("energies_file", output_params.get("energy_output_file", None))
     energy_files = []
     if energy_file:
@@ -231,20 +232,26 @@ def main() -> None:
             if batch_size == 1:
                 energy_files = [energy_file]
             else:
+                # Create per-trajectory energy filenames: energies.out -> energies_0.out, energies_1.out, ...
                 energy_files = [energy_file.replace(".out", f"_{i}.out") for i in range(batch_size)]
         else:
             energy_files = energy_file
     
-    # Get summary output file(s)
+    # Summary file setup: per-trajectory summary filenames for batch mode statistics
+    # When batch_size > 1, each trajectory gets its own summary file (summary_0.out, summary_1.out, ...)
+    # This enables independent tracking of energy drift, temperature, and performance per trajectory
     summary_cfg = output_params.get("summary_file", None)
     summary_files = None
     if summary_cfg:
         if isinstance(summary_cfg, str):
             if batch_size == 1:
+                # Single trajectory: use the configured summary filename as-is
                 summary_files = [summary_cfg]
             else:
+                # Multiple trajectories: append _i suffix to create separate summary per trajectory
                 summary_files = [summary_cfg.replace(".out", f"_{i}.out") for i in range(batch_size)]
         elif isinstance(summary_cfg, list):
+            # User provided explicit list of summary filenames (one per trajectory)
             summary_files = summary_cfg
 
     # Track variance option
@@ -279,20 +286,24 @@ def main() -> None:
     thermostat_params = simulation_parameters.get("thermostat_parameters", simulation_parameters)
     is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
     
-    # Prepare summary file(s) if requested
+    # Prepare summary file(s) if save_summary parameter is set (interval between summary writes in steps)
+    # If save_summary is None, summary output is disabled
     if save_summary is None:
+        # No summary requested; disable summary output entirely
         summary_files = None
     elif summary_files is None:
-        # default fallback when save_summary is set but no summary_file provided
+        # Fallback: if save_summary is set but no summary_file config provided, create defaults
         if batch_size == 1:
             summary_files = ["summary.out"]
         else:
+            # Default naming for per-trajectory summaries when batch_size > 1
             summary_files = [f"summary_{i}.out" for i in range(batch_size)]
     
     # Energy tracking for summary and drift calculation
-    initial_total_energy = None
-    max_energy_drift = None
-    energy_history = []  # Store energy data for summary statistics
+    # These are initialized per-trajectory for batch mode (arrays with shape batch_size)
+    initial_total_energy = None  # Baseline total energy per trajectory (set on first energy_data arrival)
+    max_energy_drift = None      # Max energy deviation from baseline per trajectory (1D array in batch mode)
+    energy_history = []          # Accumulate energy frames from integrator for summary statistics (cleared every save_summary steps)
     
     header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
     if batch_size == 1:
@@ -351,15 +362,19 @@ def main() -> None:
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
         
-        # Write summary output if requested
+        # Write summary output if requested (every save_summary steps)
+        # Summary aggregates energy statistics for each trajectory independently over the interval
         if save_summary is not None and summary_files is not None and (istep + 1) % save_summary == 0:
             from fennol.utils.io import human_time_duration
             
-            # Calculate statistics over the summary interval
+            # Calculate per-trajectory statistics over the summary interval (accumulated in energy_history)
             n_summary_steps = len(energy_history)
             if n_summary_steps > 0:
+                # Helper function: extract per-trajectory value from energy dict
+                # Handles case where energy data is stored as batch array (batch_size,) or per-traj
                 def _extract_traj_val(entry, key, b):
                     arr = np.atleast_1d(np.asarray(entry[key], dtype=float))
+                    # Index b selects the b-th trajectory; fallback to last if out of bounds
                     idx = b if b < arr.size else arr.size - 1
                     return arr[idx]
                 
@@ -378,15 +393,18 @@ def main() -> None:
                 est_remaining_time = remaining_steps * (total_elapsed_time / (istep + 1))
                 est_total_duration = total_elapsed_time + est_remaining_time
                 
+                # Write summary for each trajectory independently (per-trajectory stats to per-trajectory file)
                 for b in range(batch_size):
                     if b >= len(summary_files):
                         continue
 
+                    # Extract trajectory b's energy series from accumulated history (all frames since last summary)
                     all_etot = np.array([_extract_traj_val(e, 'total_energies', b) for e in energy_history], dtype=float)
                     all_epot = np.array([_extract_traj_val(e, 'potential_energies', b) for e in energy_history], dtype=float)
                     all_ekin = np.array([_extract_traj_val(e, 'kinetic_energies', b) for e in energy_history], dtype=float)
                     all_temp = np.array([_extract_traj_val(e, 'temperatures', b) for e in energy_history], dtype=float)
 
+                    # Calculate mean and standard deviation for trajectory b over the summary interval
                     avg_etot = np.mean(all_etot)
                     std_etot = np.std(all_etot)
                     avg_epot = np.mean(all_epot)
@@ -396,10 +414,12 @@ def main() -> None:
                     avg_temp = np.mean(all_temp)
                     std_temp = np.std(all_temp)
 
+                    # Compute energy drift percentage for trajectory b (NVE energy conservation quality metric)
                     drift_percent = 0.0
                     if initial_total_energy is not None and b < len(initial_total_energy) and initial_total_energy[b] != 0:
                         drift_percent = (max_energy_drift[b] / abs(initial_total_energy[b])) * 100.0
 
+                    # Write trajectory-specific summary to its dedicated summary file
                     with open(summary_files[b], 'a') as f:
                         f.write("##################################################\n")
                         f.write(f"# Step {istep+1:_} of {n_steps:_}  ({((istep+1)/n_steps*100):.3f} %)\n")
@@ -457,15 +477,21 @@ def main() -> None:
     nsperday = (simulation_time / total_time)*60*60*24*us.NS
     print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
 
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
     # Batch artifact export: move per-trajectory outputs into SIMXXXXX dirs
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
+    # This section organizes batch run outputs into timestamped simulation folders (SIM00000, SIM00001, ...)
+    # Each SIM folder contains a single trajectory's outputs (trajectory.xyz, energies.out, summary.out)
+    # plus copies of the input configuration (input.yaml, starting geometry)
+    # This structure enables easy tracking and comparison of multiple parallel simulations
+    
     print(f"# [BATCH_DEBUG] Entering batch artifact export phase (batch_size={batch_size})")
     if batch_size <= 1:
         print("# [BATCH_DEBUG] batch_size <= 1, skipping SIM export logic")
         return
 
     def _resolve_existing_path(path_str, bases):
+        """Resolve a file path by checking absolute path, searching candidate bases, or current dir."""
         if path_str is None:
             return None
         if os.path.isabs(path_str) and os.path.exists(path_str):
@@ -479,12 +505,14 @@ def main() -> None:
         return None
 
     def _move_if_exists(src_path, dst_dir, dst_name=None):
+        """Move a file from src_path to dst_dir, optionally renaming to dst_name. Overwrites existing target."""
         if src_path is None:
             print(f"# [BATCH_DEBUG] move skipped (source is None) -> dst_dir={dst_dir}")
             return
         if os.path.isfile(src_path):
             target_name = dst_name if dst_name else os.path.basename(src_path)
             target_path = os.path.join(dst_dir, target_name)
+            # Remove target if exists to avoid shutil.move conflicts
             if os.path.exists(target_path):
                 os.remove(target_path)
             shutil.move(src_path, target_path)
@@ -493,6 +521,7 @@ def main() -> None:
             print(f"# Warning: expected file not found, skipping move: {src_path}")
 
     def _copy_if_exists(src_path, dst_dir, dst_name=None):
+        """Copy a file from src_path to dst_dir, optionally renaming to dst_name."""
         if src_path is None:
             print(f"# [BATCH_DEBUG] copy skipped (source is None) -> dst_dir={dst_dir}")
             return
@@ -504,6 +533,7 @@ def main() -> None:
         else:
             print(f"# Warning: expected file not found, skipping copy: {src_path}")
 
+    # Scan existing SIMXXXXX folders and allocate new sequential indices
     sim_root = os.getcwd()
     print(f"# [BATCH_DEBUG] scanning existing SIM dirs in: {sim_root}")
     existing = []
@@ -511,6 +541,7 @@ def main() -> None:
         m = re.fullmatch(r"SIM(\d{5})", name)
         if m and os.path.isdir(os.path.join(sim_root, name)):
             existing.append(int(m.group(1)))
+    # Allocate next batch: if folders exist, start after the highest; else start at 0
     start_sim = (max(existing) + 1) if existing else 0
     if existing:
         print(f"# [BATCH_DEBUG] existing SIM indices: {sorted(existing)}")
@@ -518,6 +549,7 @@ def main() -> None:
         print("# [BATCH_DEBUG] no existing SIM dirs found; starting at SIM00000")
     print(f"# [BATCH_DEBUG] allocated start index: {start_sim:05d}")
 
+    # Create SIM folders for this batch (batch_size of them)
     sim_dirs = []
     for i in range(batch_size):
         dname = f"SIM{start_sim + i:05d}"
@@ -526,23 +558,27 @@ def main() -> None:
         sim_dirs.append(dpath)
     print(f"# [BATCH_DEBUG] created/verified SIM dirs: {[os.path.basename(d) for d in sim_dirs]}")
 
+    # Resolve paths to input files (initial geometry, input YAML) for copying
     input_file_abs = os.path.abspath(args.input_file)
     print(f"# [BATCH_DEBUG] input file resolved to: {input_file_abs}")
     initial_geom_abs = None
     if isinstance(initial_xyz, str):
+        # Try to resolve initial geometry file in input dir or current dir
         initial_geom_abs = _resolve_existing_path(
             initial_xyz,
             [input_yaml_dir, os.getcwd()]
         )
     print(f"# [BATCH_DEBUG] initial geometry resolved to: {initial_geom_abs}")
 
-    # summary source(s): per-trajectory summary outputs
+    # Prepare per-trajectory summary file sources (per-trajectory summary files from main run)
     per_summary_sources = None
     if isinstance(summary_files, list):
+        # summary_files contains the actual per-trajectory summary output files
         per_summary_sources = summary_files
     print(f"# [BATCH_DEBUG] per_summary_sources: {per_summary_sources}")
 
-    # Destination base names (no _i suffix) for files copied into SIMXXXXX dirs
+    # Destination base names: files copied into SIM folders are renamed to configured base names (no _i suffix)
+    # This makes each SIM folder independent and self-contained
     traj_dst_name = os.path.basename(traj_file) if write_traj else None
     if isinstance(energy_file, str):
         energy_dst_name = os.path.basename(energy_file)
@@ -557,31 +593,34 @@ def main() -> None:
         f"traj: {traj_dst_name}, energy: {energy_dst_name}, summary: {summary_dst_name}"
     )
 
+    # Move/copy per-trajectory outputs into their respective SIM folders
     for i, sim_dir in enumerate(sim_dirs):
         print(f"# [BATCH_DEBUG] processing trajectory index {i} for '{sim_dir}'")
-        # Per-trajectory trajectory file
+        
+        # Move trajectory file (generated output with _i suffix) -> destination with base name
         if write_traj and i < len(traj_paths):
             _move_if_exists(os.path.abspath(traj_paths[i]), sim_dir, traj_dst_name)
 
-        # Per-trajectory energy file
+        # Move energy file (generated output with _i suffix) -> destination with base name
         if energy_file and i < len(energy_files):
             if energy_dst_name:
                 _move_if_exists(os.path.abspath(energy_files[i]), sim_dir, energy_dst_name)
             else:
-                # If a list of custom names is provided, keep source basename
+                # If energy_file is a custom list, keep source basename
                 _move_if_exists(os.path.abspath(energy_files[i]), sim_dir)
 
-        # Summary file (global or per-trajectory list if available)
+        # Move summary file (per-trajectory summary from main run) -> destination with base name
         if per_summary_sources is not None and i < len(per_summary_sources):
             if summary_dst_name:
                 _move_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir, summary_dst_name)
             else:
                 _move_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir)
 
-        # Always copy input YAML and starting geometry if available
+        # Always copy input YAML and starting geometry 
         _copy_if_exists(input_file_abs, sim_dir)
         _copy_if_exists(initial_geom_abs, sim_dir)
 
+    # Report completion of batch artifact export
     if batch_size > 1:
         print(
             f"# Exported batch artifacts into {batch_size} simulation folder(s): "
