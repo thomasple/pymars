@@ -287,7 +287,9 @@ def main() -> None:
     energy_history = []  # Store energy data for summary statistics
     
     header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
-    print(header)
+    if batch_size == 1:
+        print(header)
+
     for istep in range(start_step, n_steps):
         coordinates, velocities, accelerations, energies, energy_data, frame_variance = integrate(
             coordinates, velocities, accelerations,
@@ -327,7 +329,8 @@ def main() -> None:
                 time_str = f"{time_fs:.{time_decimals}f}"
 
             line = f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
-            print(line)
+            if batch_size == 1:
+                print(line)
 
             if write_traj:
                 coords = np.array(coordinates)
@@ -441,6 +444,11 @@ def main() -> None:
     # ------------------------------------------------------------------ #
     # Batch artifact export: copy per-trajectory outputs into SIMXXXXX dirs
     # ------------------------------------------------------------------ #
+    print(f"# [BATCH_DEBUG] Entering batch artifact export phase (batch_size={batch_size})")
+    if batch_size <= 1:
+        print("# [BATCH_DEBUG] batch_size <= 1, skipping SIM export logic")
+        return
+
     def _resolve_existing_path(path_str, bases):
         if path_str is None:
             return None
@@ -456,20 +464,28 @@ def main() -> None:
 
     def _copy_if_exists(src_path, dst_dir, dst_name=None):
         if src_path is None:
+            print(f"# [BATCH_DEBUG] copy skipped (source is None) -> dst_dir={dst_dir}")
             return
         if os.path.isfile(src_path):
             target_name = dst_name if dst_name else os.path.basename(src_path)
             shutil.copy2(src_path, os.path.join(dst_dir, target_name))
+            print(f"# [BATCH_DEBUG] copied '{src_path}' -> '{os.path.join(dst_dir, target_name)}'")
         else:
             print(f"# Warning: expected file not found, skipping copy: {src_path}")
 
     sim_root = os.getcwd()
+    print(f"# [BATCH_DEBUG] scanning existing SIM dirs in: {sim_root}")
     existing = []
     for name in os.listdir(sim_root):
         m = re.fullmatch(r"SIM(\d{5})", name)
         if m and os.path.isdir(os.path.join(sim_root, name)):
             existing.append(int(m.group(1)))
     start_sim = (max(existing) + 1) if existing else 0
+    if existing:
+        print(f"# [BATCH_DEBUG] existing SIM indices: {sorted(existing)}")
+    else:
+        print("# [BATCH_DEBUG] no existing SIM dirs found; starting at SIM00000")
+    print(f"# [BATCH_DEBUG] allocated start index: {start_sim:05d}")
 
     sim_dirs = []
     for i in range(batch_size):
@@ -477,19 +493,23 @@ def main() -> None:
         dpath = os.path.join(sim_root, dname)
         os.makedirs(dpath, exist_ok=True)
         sim_dirs.append(dpath)
+    print(f"# [BATCH_DEBUG] created/verified SIM dirs: {[os.path.basename(d) for d in sim_dirs]}")
 
     input_file_abs = os.path.abspath(args.input_file)
+    print(f"# [BATCH_DEBUG] input file resolved to: {input_file_abs}")
     initial_geom_abs = None
     if isinstance(initial_xyz, str):
         initial_geom_abs = _resolve_existing_path(
             initial_xyz,
             [input_yaml_dir, os.getcwd()]
         )
+    print(f"# [BATCH_DEBUG] initial geometry resolved to: {initial_geom_abs}")
 
     # summary source(s): if list provided use per-index, otherwise same file for all
     per_summary_sources = None
     if 'summary_files' in locals() and isinstance(summary_files, list):
         per_summary_sources = summary_files
+    print(f"# [BATCH_DEBUG] per_summary_sources: {per_summary_sources}")
 
     # Destination base names (no _i suffix) for files copied into SIMXXXXX dirs
     traj_dst_name = os.path.basename(traj_file) if write_traj else None
@@ -501,8 +521,13 @@ def main() -> None:
         summary_dst_name = os.path.basename(summary_file)
     else:
         summary_dst_name = None
+    print(
+        f"# [BATCH_DEBUG] destination base names -> "
+        f"traj: {traj_dst_name}, energy: {energy_dst_name}, summary: {summary_dst_name}"
+    )
 
     for i, sim_dir in enumerate(sim_dirs):
+        print(f"# [BATCH_DEBUG] processing trajectory index {i} for '{sim_dir}'")
         # Per-trajectory trajectory file
         if write_traj and i < len(traj_paths):
             _copy_if_exists(os.path.abspath(traj_paths[i]), sim_dir, traj_dst_name)
@@ -532,11 +557,12 @@ def main() -> None:
         _copy_if_exists(input_file_abs, sim_dir)
         _copy_if_exists(initial_geom_abs, sim_dir)
 
-    if batch_size > 0:
+    if batch_size > 1:
         print(
             f"# Exported batch artifacts into {batch_size} simulation folder(s): "
             f"SIM{start_sim:05d}..SIM{start_sim + batch_size - 1:05d}"
         )
+        print("# [BATCH_DEBUG] batch artifact export phase completed")
 
 
 if __name__ == "__main__":
