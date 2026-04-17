@@ -5,16 +5,28 @@ import os
 import time
 import re
 import shutil
+import sys
 
 
 __all__ = []
 
 def main() -> None:
+    # Fail fast on unsupported Python versions.
+    # Although pyproject declares >=3.10, this runtime guard gives a clear message
+    # when users launch pymars with an older interpreter.
+    if sys.version_info < (3, 10):
+        detected = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        raise RuntimeError(
+            "pymars requires Python 3.10 or newer. "
+            f"Detected Python {detected} at '{sys.executable}'. "
+            "Please run with Python 3.10+ (for example, activate the correct virtual environment)."
+        )
+
     # Print installed package path (directory containing this __init__.py module).
     print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
     # Print execution folder (working directory where the command is run, which may differ from installation path).
     print(f"# Running from folder: {os.getcwd()}")
-    
+
     parser = argparse.ArgumentParser(
         description="pymars: A molecular collision simulation package"
     )
@@ -52,7 +64,7 @@ def main() -> None:
     restart_file = os.path.join(input_yaml_dir, restart_file_name)
     # Also show where we'll look/save restart files
     # (useful when working directories or folder names change)
-    print(f"# Restart file will be: {restart_file}")
+    print(f"# Restart file will be: {restart_file_name}")
 
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
