@@ -49,7 +49,7 @@ def main() -> None:
     # Determine restart file path: place the restart file next to the input YAML
     input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
     restart_file = os.path.join(input_yaml_dir, restart_file_name)
-    # Also show where we'll look/save restart files
+    # Also show the name of the restart file
     # (useful when working directories or folder names change)
     print(f"# Restart file will be: {restart_file_name}")
 
@@ -160,6 +160,12 @@ def main() -> None:
         # Single-trajectory run: keep scalar seed exactly as provided.
         trajectory_seeds = [int(seed_cfg)]
     else:
+        if batch_size_cfg > 1 and seed_cfg is not None:
+            print(
+                "# WARNING: general_parameters.seed is a scalar while batch_size > 1. "
+                "Scalar seed is ignored in batch mode; generating random unique per-trajectory seeds instead. "
+                "Provide a list (or comma-separated values) with one seed per trajectory to use custom seeds."
+            )
         trajectory_seeds = [
             int(x) for x in _seed_rng.integers(0, 2**32 - 1, size=batch_size_cfg, dtype=np.uint32)
         ]
@@ -716,7 +722,7 @@ def main() -> None:
         summary_dst_name = None
     print(
     #    f"# [BATCH_DEBUG] destination base names -> "
-        f"traj: {traj_dst_name}, energy: {energy_dst_name}, summary: {summary_dst_name}"
+        f"# traj: {traj_dst_name}, energy: {energy_dst_name}, summary: {summary_dst_name}"
     )
 
     # Move/copy per-trajectory outputs into their respective SIM folders

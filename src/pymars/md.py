@@ -1,4 +1,5 @@
 import numpy as np
+import os
 from fennol.utils.periodic_table import PERIODIC_TABLE, ATOMIC_MASSES
 from .utils import (
     us,
@@ -334,8 +335,8 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         # a(t+dt) computed from forces at new coordinates
         # v(t+dt) = v(t+dt/2) + a(t+dt) * dt/2
         energies, forces, _var = total_energies_and_forces(coordinates, conformation)
-        accelerations = forces / masses  # (batch_size,N+1,3)
-        velocities = velocities + accelerations * dt2  # (batch_size,N,3)
+        accelerations = forces / masses  # (batch_size,N+1,3) in collision mode; (batch_size,N,3) otherwise
+        velocities = velocities + accelerations * dt2  # (batch_size,N+1,3) in collision mode; (batch_size,N,3) otherwise
         return velocities, accelerations, energies  # energies is (batch_size,)
 
     def integrate(initial_coordinates, initial_velocities, accelerations, step=0, energy_output_file=None, energy_steps=100):
@@ -372,7 +373,14 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             try:
                 _, _, aux_var = total_energies_and_forces(coordinates, conformation)
                 if aux_var is not None:
-                    frame_variance = np.atleast_1d(np.array(aux_var))
+                    arr = np.atleast_1d(np.array(aux_var, dtype=float))
+                    # total_energies_and_forces uses all-NaN as sentinel when model does not
+                    # provide etot_ensemble_var. Convert that sentinel back to None so
+                    # downstream output writes 'None' instead of 'nan'.
+                    if np.all(np.isnan(arr)):
+                        frame_variance = None
+                    else:
+                        frame_variance = arr
             except Exception:
                 frame_variance = None
 
@@ -438,8 +446,13 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 # User provided explicit list of filenames (one per trajectory)
                 file_path = output_file[b]
             else:
-                # Single filename: use as-is if batch_size==1, else append _b suffix
-                file_path = output_file if batch_size == 1 else f"{output_file}_{b}"
+                # Single filename: use as-is if batch_size==1.
+                # For batch_size>1, insert _b before extension (energies.out -> energies_0.out).
+                if batch_size == 1:
+                    file_path = output_file
+                else:
+                    root, ext = os.path.splitext(output_file)
+                    file_path = f"{root}_{b}{ext}"
 
             # Create file with header if step == 0 (first write)
             if step == 0:
