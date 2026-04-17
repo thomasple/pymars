@@ -1,4 +1,4 @@
-# PyMARS Simulation Configuration
+# PyMARS Simulation Configuration Input File
 
 calculation_parameters:
   device: cpu  # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu

@@ -5,23 +5,10 @@ import os
 import time
 import re
 import shutil
-import sys
-
 
 __all__ = []
 
 def main() -> None:
-    # Fail fast on unsupported Python versions.
-    # Although pyproject declares >=3.10, this runtime guard gives a clear message
-    # when users launch pymars with an older interpreter.
-    if sys.version_info < (3, 10):
-        detected = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        raise RuntimeError(
-            "pymars requires Python 3.10 or newer. "
-            f"Detected Python {detected} at '{sys.executable}'. "
-            "Please run with Python 3.10+ (for example, activate the correct virtual environment)."
-        )
-
     # Print installed package path (directory containing this __init__.py module).
     print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
     # Print execution folder (working directory where the command is run, which may differ from installation path).
