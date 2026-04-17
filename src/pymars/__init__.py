@@ -10,6 +10,11 @@ import shutil
 __all__ = []
 
 def main() -> None:
+    # Print installed package path (directory containing this __init__.py module).
+    print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
+    # Print execution folder (working directory where the command is run, which may differ from installation path).
+    print(f"# Running from folder: {os.getcwd()}")
+    
     parser = argparse.ArgumentParser(
         description="pymars: A molecular collision simulation package"
     )
