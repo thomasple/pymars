@@ -5,19 +5,20 @@ import numpy as np
 
 __all__ = ['apply_random_rotation', 'uniform_orientation', 'random_orientations']
 
-def apply_random_rotation(coords, n_rotations=None):
+def apply_random_rotation(coords, n_rotations=None, rng=None):
     """ randomly rotate vectors.
 
     Args:
     - coords: array of shape (N,3)
     - n_rotations: number of random rotations to apply. If None, a single rotation is applied.
+    - rng: optional random generator / random_state passed to scipy Rotation.random
     Returns:
     - rotated_coordinates: rotated array of shape (n_rotations,N,3) or (N,3) if n_rotations is None
     """
     nrot = 1 if n_rotations is None else n_rotations
     # angles = np.random.uniform(0,2*np.pi,size=(nrot,3))
     # M = R.from_euler('zyx', angles, degrees=False).as_matrix() # (nrot,3,3)
-    M = R.random(nrot).as_matrix()  # (nrot,3,3)
+    M = R.random(nrot, random_state=rng).as_matrix()  # (nrot,3,3)
 
     rotated_coordinates = np.einsum('rij,nj->rni', M, coords)
     return rotated_coordinates[0] if n_rotations is None else rotated_coordinates
