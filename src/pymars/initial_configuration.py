@@ -25,12 +25,13 @@ def read_initial_configuration(filename):
     return species, coordinates
 
 
-def sample_velocities(species, temperature):
+def sample_velocities(species, temperature, rng=None):
     """Sample velocities from Maxwell-Boltzmann distribution at given temperature.
 
     Args:
      - species: array of shape (N,) with atomic species indices
      - temperature: temperature in Kelvin
+    - rng: optional numpy random generator (np.random.Generator compatible)
     Returns:
      - velocities: array of shape (N,3) with sampled velocities
     """
@@ -38,8 +39,10 @@ def sample_velocities(species, temperature):
     kT = us.K_B * temperature
     masses = ATOMIC_MASSES[species] / us.DA
     stddev = np.sqrt(kT / masses)  # (N,)
+    if rng is None:
+        rng = np.random
     velocities = (
-        np.random.normal(0.0, 1.0, size=(species.shape[0], 3)) * stddev[:, None]
+        rng.normal(0.0, 1.0, size=(species.shape[0], 3)) * stddev[:, None]
     )
 
     return velocities
@@ -86,7 +89,7 @@ def remove_com_velocity(coordinates, velocities, species):
 
 
 def sample_projectiles(
-    n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18
+    n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18, rng=None
 ):
     """Sample projectile initial positions and velocities for collision simulations.
 
@@ -94,7 +97,8 @@ def sample_projectiles(
      - n_projectiles: number of projectiles to sample
      - temperature: temperature in Kelvin for velocity sampling
     - distance: initial distance of projectiles from origin along -x direction (in angstroms)
-        - max_impact_parameter: maximum impact parameter in angstroms (default 0.5)
+     - max_impact_parameter: maximum impact parameter in angstroms (default 0.5)
+     - rng: optional numpy random generator (np.random.Generator compatible)
     Returns:
      - projectile_positions: array of shape (n_projectiles,3) with initial positions
      - projectile_velocities: array of shape (n_projectiles,3) with initial velocities
@@ -106,9 +110,12 @@ def sample_projectiles(
     projectile_velocities = np.zeros((n_projectiles, 3), dtype=np.float32)
     projectile_velocities[:, 0] = v_magnitude  # projectiles move along x
 
+    if rng is None:
+        rng = np.random
+
     # Sample impact parameters uniformly within a circle of radius max_impact_parameter
-    r = max_impact_parameter * np.sqrt(np.random.uniform(0, 1, size=n_projectiles))
-    theta = np.random.uniform(0, 2 * np.pi, size=n_projectiles)
+    r = max_impact_parameter * np.sqrt(rng.uniform(0, 1, size=n_projectiles))
+    theta = rng.uniform(0, 2 * np.pi, size=n_projectiles)
     y = r * np.cos(theta)
     z = r * np.sin(theta)
     projectile_positions = np.zeros((n_projectiles, 3), dtype=np.float32)

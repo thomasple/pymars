@@ -132,12 +132,67 @@ def main() -> None:
     from .utils import us
     simulation_parameters = convert_dict_units(simulation_parameters, us)
     
-    ### Set random seed for reproducibility
+    ### Set per-trajectory seeds for reproducibility / stochastic initialization
     general_params = simulation_parameters.get("general_parameters", simulation_parameters)
-    random_seed = general_params.get("seed", np.random.randint(0, 2**32 - 1))
-    print(f"# Random seed: {random_seed}")
-    np.random.seed(random_seed)
-    # JAX random key will be set in md.py for velocity sampling
+    batch_size_cfg = int(general_params.get("batch_size", 1))
+    if batch_size_cfg < 1:
+        raise ValueError(f"general_parameters.batch_size must be >= 1, got {batch_size_cfg}")
+
+    seed_cfg = general_params.get("seed", None)
+    _seed_rng = np.random.default_rng()
+    user_provided_seed_list = False
+
+    # Keep user-facing input key as `seed`.
+    # Accepted forms:
+    # - batch_size > 1: list/tuple/ndarray of seeds OR comma-separated string "1,2,3"
+    # - batch_size == 1: scalar seed value (int-like) is used directly
+    # Fallback behavior:
+    # - batch_size > 1 and seed missing/scalar/non-list -> random per-trajectory seeds
+    # - batch_size == 1 and seed missing -> one random seed
+    if isinstance(seed_cfg, str) and "," in seed_cfg and batch_size_cfg > 1:
+        parsed = [p.strip() for p in seed_cfg.split(",") if p.strip() != ""]
+        trajectory_seeds = [int(p) for p in parsed]
+        user_provided_seed_list = True
+    elif isinstance(seed_cfg, (list, tuple, np.ndarray)):
+        trajectory_seeds = [int(s) for s in seed_cfg]
+        user_provided_seed_list = True
+    elif batch_size_cfg == 1 and seed_cfg is not None:
+        # Single-trajectory run: keep scalar seed exactly as provided.
+        trajectory_seeds = [int(seed_cfg)]
+    else:
+        trajectory_seeds = [
+            int(x) for x in _seed_rng.integers(0, 2**32 - 1, size=batch_size_cfg, dtype=np.uint32)
+        ]
+
+    if len(trajectory_seeds) != batch_size_cfg:
+        raise ValueError(
+            f"general_parameters.seed provides {len(trajectory_seeds)} value(s), "
+            f"but batch_size is {batch_size_cfg}. Provide one seed per trajectory."
+        )
+
+    # For batch runs, enforce unique seeds across trajectories.
+    # - user-provided lists with duplicates: fail fast with clear message
+    # - randomly generated seeds with duplicates: replace duplicates with new unique seeds
+    if batch_size_cfg > 1:
+        if user_provided_seed_list and len(set(trajectory_seeds)) != len(trajectory_seeds):
+            raise ValueError("same seed repeated, ensure all seeds are unique")
+
+        if not user_provided_seed_list:
+            seen = set()
+            for i, s in enumerate(trajectory_seeds):
+                while s in seen:
+                    s = int(_seed_rng.integers(0, 2**32 - 1, dtype=np.uint32))
+                trajectory_seeds[i] = s
+                seen.add(s)
+
+    print(f"# Per-trajectory seeds:")
+    print("# " + " / ".join(f"traj[{i}]_seed={s}" for i, s in enumerate(trajectory_seeds)))
+
+    # Pass resolved per-trajectory seeds to md initialization code.
+    if "general_parameters" in simulation_parameters and isinstance(simulation_parameters["general_parameters"], dict):
+        simulation_parameters["general_parameters"]["seed_list"] = trajectory_seeds
+    else:
+        simulation_parameters["seed_list"] = trajectory_seeds
     
     ### Set precision (double precision / float64)
     calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)

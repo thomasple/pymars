@@ -98,6 +98,19 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     batch_size = general_params.get("batch_size", 1)
     assert batch_size >= 1, "batch_size must be at least 1"
 
+    # Per-trajectory seeds: expected from __init__.py as general_parameters.seed_list.
+    # Fallback to random generation if not provided.
+    seed_list_cfg = general_params.get("seed_list", simulation_parameters.get("seed_list", None))
+    if seed_list_cfg is None:
+        seed_list = [int(x) for x in np.random.default_rng().integers(0, 2**32 - 1, size=batch_size, dtype=np.uint32)]
+    else:
+        seed_list = [int(s) for s in seed_list_cfg]
+        if len(seed_list) != batch_size:
+            raise ValueError(
+                f"general_parameters.seed_list has {len(seed_list)} seed(s), but batch_size is {batch_size}."
+            )
+    trajectory_rngs = [np.random.default_rng(s) for s in seed_list]
+
     # Batch-size guard for variance tracking
     # Model etot_ensemble_var is per-frame per-trajectory, not aggregatable across batch trajectories
     if track_variance and batch_size > 1:
@@ -111,22 +124,25 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     # random rotation
     do_random_rotation = input_params.get("random_rotation", True)
     if do_random_rotation:
-        coordinates = apply_random_rotation(coordinates, n_rotations=batch_size)
+        # Apply one independently seeded random rotation per trajectory.
+        coordinates = np.stack(
+            [apply_random_rotation(coordinates, n_rotations=None, rng=trajectory_rngs[b]) for b in range(batch_size)],
+            axis=0,
+        ).astype(np.float32, copy=False)
         if verbose:
             print("# Applied random rotation to initial configuration.")
     else:
         coordinates = np.tile(coordinates, (batch_size, 1, 1))  # (batch_size,N,3)
-
-    batch_species = np.tile(species, batch_size)  # (batch_size*N)
 
     # Sample velocities from Maxwell-Boltzmann distribution at temperature
     # Each trajectory in batch gets independent velocity random sampling
     # Shape: (batch_size, N, 3) - velocities per atom per trajectory
     temperature = general_params.get("temperature", 0.0)  # Kelvin
     assert temperature >= 0.0, "Temperature must be non-negative"
-    velocities = sample_velocities(batch_species, temperature).reshape(
-        batch_size, -1, 3
-    )  # (batch_size,N,3)
+    velocities = np.stack(
+        [sample_velocities(species, temperature, rng=trajectory_rngs[b]) for b in range(batch_size)],
+        axis=0,
+    ).astype(np.float32, copy=False)  # (batch_size,N,3)
     if verbose:
         print(f"# Sampled velocities at T={temperature} K.")
 
@@ -158,14 +174,20 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             "projectile_temperature", temperature
         ))  # Kelvin
         assert projectile_temperature > 0.0, "projectile_temperature must > 0 K"
-        # Sample batch_size independent projectile trajectories
-        projectile_coordinates, projectiles_velocities = sample_projectiles(
-            batch_size,
-            temperature=projectile_temperature,
-            distance=projectile_distance,
-            projectile_species=projectile_species,
-            max_impact_parameter=max_impact_parameter,
-        )
+        # Sample batch_size independent projectile trajectories, one RNG per trajectory.
+        projectile_coordinates = np.zeros((batch_size, 3), dtype=np.float32)
+        projectiles_velocities = np.zeros((batch_size, 3), dtype=np.float32)
+        for b in range(batch_size):
+            pcoords_b, pvels_b = sample_projectiles(
+                1,
+                temperature=projectile_temperature,
+                distance=projectile_distance,
+                projectile_species=projectile_species,
+                max_impact_parameter=max_impact_parameter,
+                rng=trajectory_rngs[b],
+            )
+            projectile_coordinates[b] = pcoords_b[0]
+            projectiles_velocities[b] = pvels_b[0]
 
         if verbose:
             projectile_vel = np.linalg.norm(projectiles_velocities[0])
