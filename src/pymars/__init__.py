@@ -185,8 +185,10 @@ def main() -> None:
                 trajectory_seeds[i] = s
                 seen.add(s)
 
-    print(f"# Per-trajectory seeds:")
-    print("# " + " / ".join(f"traj[{i}]_seed={s}" for i, s in enumerate(trajectory_seeds)))
+    print("# Per-trajectory seeds:")
+    print(f"# {'trajectory':>10} {'seed':>12}")
+    for i, s in enumerate(trajectory_seeds):
+        print(f"# {i:>10d} {int(s):>12d}")
 
     # Pass resolved per-trajectory seeds to md initialization code.
     if "general_parameters" in simulation_parameters and isinstance(simulation_parameters["general_parameters"], dict):
@@ -629,6 +631,32 @@ def main() -> None:
         else:
             print(f"# Warning: expected file not found, skipping copy: {src_path}")
 
+    def _copy_input_yaml_with_seed(src_path, dst_dir, seed_value):
+        """Copy input YAML and set the first `seed:` line to seed_value."""
+        if src_path is None:
+            return
+        if not os.path.isfile(src_path):
+            print(f"# Warning: expected input YAML not found, skipping copy: {src_path}")
+            return
+
+        dst_path = os.path.join(dst_dir, os.path.basename(src_path))
+        try:
+            with open(src_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Replace first non-comment seed line while preserving indentation.
+            seed_pattern = re.compile(r"^(\s*)seed\s*:\s*.*$", re.MULTILINE)
+            if seed_pattern.search(content):
+                content = seed_pattern.sub(rf"\1seed: {int(seed_value)}", content, count=1)
+            else:
+                # Fallback if seed key is missing: append a seed entry at end.
+                content = content.rstrip() + f"\nseed: {int(seed_value)}\n"
+
+            with open(dst_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as exc:
+            print(f"# Warning: failed to copy/update input YAML '{src_path}' -> '{dst_path}': {exc}")
+
     # Scan existing SIMXXXXX folders and allocate new sequential indices
     sim_root = os.getcwd()
     #print(f"# [BATCH_DEBUG] scanning existing SIM dirs in: {sim_root}")
@@ -714,8 +742,9 @@ def main() -> None:
             else:
                 _move_if_exists(os.path.abspath(per_summary_sources[i]), sim_dir)
 
-        # Always copy input YAML and starting geometry 
-        _copy_if_exists(input_file_abs, sim_dir)
+        # Always copy input YAML and starting geometry.
+        # For input YAML, rewrite seed to the trajectory-specific seed.
+        _copy_input_yaml_with_seed(input_file_abs, sim_dir, trajectory_seeds[i])
         _copy_if_exists(initial_geom_abs, sim_dir)
 
     # Report completion of batch artifact export
