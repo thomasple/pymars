@@ -44,8 +44,13 @@ calculation_parameters:
 general_parameters:
   temperature: 300.0     # Temperature in Kelvin
   batch_size: 1          # Number of parallel simulations (trajectories)
-  seed: 123456789        # Random seed for reproducibility (0 to 999,999,999). 
-                         # If not set, a random seed is used.
+  seed: 123456789        # Random seed for reproducibility.
+                         # - batch_size == 1: scalar seed (e.g., 123456789) for deterministic run.
+                         #   If not set, a random seed is generated.
+                         # - batch_size > 1: provide a list (e.g., [11, 22, 33]) or comma-separated string
+                         #   (e.g., "11,22,33") with one seed per trajectory for reproducible batch runs.
+                         #   If omitted or scalar, unique random seeds are generated per trajectory (warning printed).
+                         #   User-provided lists must contain unique seeds (ValueError raised otherwise).
   save_steps: 100        # Save trajectory frames every N steps
   save_energy: 100       # Save energy data every N steps
   save_summary: 1000     # Write summary statistics every N steps (must be >= save_energy)
@@ -219,6 +224,45 @@ Columns:
 - `Ekin`: Kinetic energy (kcal/mol)
 - `Temp[K]`: Temperature (Kelvin)
 
+**Per-trajectory energy filenames (batch mode):**
+
+When running with `batch_size > 1` and a single configured filename, pymars inserts the trajectory index before the file extension using `os.path.splitext`. Examples:
+- `energies.out` → `energies_0.out`, `energies_1.out`, …
+- `energies` → `energies_0`, `energies_1`, …
+- `my.out.file` → `my.out_0.file`, `my.out_1.file`, …
+
+Batch output and SIM export
+---------------------------
+
+When running batch simulations (`batch_size > 1`), pymars automatically organizes per-trajectory outputs into timestamped simulation folders (`SIM00000`, `SIM00001`, …):
+
+- **SIM folder creation**: One folder per trajectory, numbered sequentially based on existing folders (e.g., if `SIM00000` and `SIM00001` exist, the next batch starts at `SIM00002`).
+- **Artifact organization**: Per-trajectory output files are moved and renamed into their respective SIM folder:
+  - Trajectory file (e.g., `trajectory_0.xyz` → `trajectory.xyz` in `SIM00000`)
+  - Energy file (e.g., `energies_0.out` → `energies.out` in `SIM00000`)
+  - Summary file (e.g., `summary_0.out` → `summary.out` in `SIM00000`)
+  - This makes each SIM folder self-contained with consistently-named output files.
+- **Input YAML copy with per-trajectory seed**: The input configuration YAML is copied into each SIM folder and its `seed:` line is rewritten to contain that trajectory's assigned seed. This enables easy reproduction of any single trajectory from the batch.
+
+Example batch output structure after a 3-trajectory run:
+```
+SIM00000/
+  trajectory.xyz
+  energies.out
+  summary.out
+  input.yaml          # seed: 11
+SIM00001/
+  trajectory.xyz
+  energies.out
+  summary.out
+  input.yaml          # seed: 22
+SIM00002/
+  trajectory.xyz
+  energies.out
+  summary.out
+  input.yaml          # seed: 33
+```
+
 Restart files and variance tracking
 ---------------------------------
 
@@ -279,7 +323,9 @@ Run the unit tests with pytest:
 pytest -v
 ```
 
-The `tests/` directory contains simple, focused tests that also serve as usage examples (for example, `tests/aspirin.xyz` is a small sample geometry used in the tests).
+The `tests/` directory contains simple, focused tests that also serve as usage examples:
+- `tests/aspirin.xyz` — small sample geometry used in the tests.
+- `tests/test_batch_sim_export.py` — regression test for batch SIM folder creation, artifact organization, and per-trajectory seed rewriting in copied input YAML.
 
 Development & contributing
 - Please open issues or pull requests for new features or bug fixes.
