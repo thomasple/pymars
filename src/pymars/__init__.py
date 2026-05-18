@@ -5,6 +5,7 @@ import os
 import time
 import re
 import shutil
+import platform
 
 __all__ = []
 
@@ -195,6 +196,23 @@ def main() -> None:
     print(f"# {'trajectory':>10} {'seed':>12}")
     for i, s in enumerate(trajectory_seeds):
         print(f"# {i:>10d} {int(s):>12d}")
+
+    # Reproducibility metadata: runtime versions and hardware/platform details.
+    # Useful to record alongside seed list for scientific reproducibility.
+    try:
+        import scipy
+        scipy_version = scipy.__version__
+    except Exception:
+        scipy_version = "unavailable"
+
+    print(f"# NumPy version: {np.__version__}")
+    print(f"# SciPy version: {scipy_version}")
+    print(
+        "# Hardware: "
+        f"{platform.system()} {platform.release()} | "
+        f"{platform.machine()} | "
+        f"processor={platform.processor() or 'unknown'}"
+    )
 
     # Pass resolved per-trajectory seeds to md initialization code.
     if "general_parameters" in simulation_parameters and isinstance(simulation_parameters["general_parameters"], dict):

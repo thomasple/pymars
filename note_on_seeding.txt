@@ -1,0 +1,73 @@
+1) Where the seed is parsed and stored
+File: __init__.py
+Location: The “Set per‑trajectory seeds” block in main() .
+
+Key facts from that block:
+
+The user‑facing key is still general_parameters.seed.
+If batch_size > 1 and seed is:
+list/tuple/ndarray → treated as the per‑trajectory seed list.
+comma‑separated string like "1,2,3" → split and treated as per‑trajectory seed list.
+If batch_size == 1 and seed is scalar → used directly.
+If batch_size > 1 and seed is scalar/non‑list or missing → per‑trajectory random seeds are generated; a warning is printed if scalar.
+Uniqueness enforced for batch runs (duplicates in user list raise an error; duplicates in random list are regenerated).
+Finally, the resolved per‑trajectory seed list is passed to MD initialization:
+
+
+simulation_parameters["general_parameters"]["seed_list"] = trajectory_seeds
+So the per‑trajectory seeds used for stochastic initialization are always stored under general_parameters.seed_list.
+
+2) How the seed list is consumed in MD initialization
+File: md.py
+Function: initialize_collision_simulation
+
+In this function:
+
+
+seed_list_cfg = general_params.get("seed_list", simulation_parameters.get("seed_list", None))...trajectory_rngs = [np.random.default_rng(s) for s in seed_list]
+This creates one numpy RNG per trajectory, seeded from the seed_list. These RNGs are then used for:
+
+3) Random rotation
+File: md.py
+Section: “random rotation”
+
+
+coordinates = np.stack(    [apply_random_rotation(coordinates, n_rotations=None, rng=trajectory_rngs[b])     for b in range(batch_size)],    axis=0,)
+So each trajectory uses its own RNG. The RNG is passed into:
+
+File: rotation_utils.py
+Function: apply_random_rotation
+
+
+M = R.random(nrot, random_state=rng).as_matrix()
+Key fact:
+
+scipy.spatial.transform.Rotation.random(..., random_state=rng) is seeded by the per‑trajectory RNG passed in from md.py.
+✅ Therefore, random rotation is fully reproducible per trajectory, based on the seed in seed_list[b].
+
+4) Initial velocity sampling
+File: md.py
+Section: “Sample velocities”
+
+
+velocities = np.stack(    [sample_velocities(species, temperature, rng=trajectory_rngs[b])     for b in range(batch_size)],    axis=0,)
+sample_velocities(...) is defined in:
+
+File: initial_configuration.py
+Function: sample_velocities
+
+
+if rng is None:    rng = np.randomvelocities = rng.normal(0.0, 1.0, size=(species.shape[0], 3)) * stddev[:, None]
+Key facts:
+
+The RNG passed in is trajectory‑specific.
+Thus the Maxwell–Boltzmann velocity sampling is deterministic per trajectory given the seed.
+✅ Therefore, initial velocities are reproducible per trajectory, based on the same seed_list[b] that also drives rotation.
+
+5) Summary (seed → rotation + velocity)
+general_parameters.seed → parsed in __init__.py → stored as seed_list
+seed_list[b] → np.random.default_rng(seed_list[b])
+That RNG is used for:
+random rotation (via apply_random_rotation(..., rng=trajectory_rngs[b]))
+initial velocities (via sample_velocities(..., rng=trajectory_rngs[b]))
+So the seed directly controls both the random rotation and the velocity initialization per trajectory.

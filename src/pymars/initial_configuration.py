@@ -124,7 +124,3 @@ def sample_projectiles(
     projectile_positions[:, 2] = z
 
     return projectile_positions, projectile_velocities
-
-
-
-    

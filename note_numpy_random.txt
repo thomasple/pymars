@@ -1,0 +1,231 @@
+NumPy is not using the old global RNG (np.random.seed(...)). It is using the newer Generator API:
+
+rng = np.random.default_rng(seed)
+
+This is important because the mechanics are different.
+
+1) What np.random.default_rng(seed) actually does
+
+When we call:
+
+rng = np.random.default_rng(1234)
+
+NumPy:
+
+Takes the integer seed (1234)
+Uses it to initialize a BitGenerator
+Wraps that in a high-level Generator object
+
+By default, modern NumPy uses:
+
+Generator
+backed by PCG64
+
+So internally it is approximately:
+
+from numpy.random import Generator, PCG64
+
+bitgen = PCG64(1234)
+rng = Generator(bitgen)
+2) What is a pseudo-random generator?
+
+The numbers are not truly random.
+
+A PRNG (pseudo-random number generator):
+
+starts from an internal state
+applies deterministic mathematical transformations
+produces a sequence that looks random
+
+Same seed → same internal state → same sequence.
+
+So:
+
+rng1 = np.random.default_rng(42)
+rng2 = np.random.default_rng(42)
+
+rng1.normal()
+rng2.normal()
+
+always gives identical outputs.
+
+That is why trajectories are reproducible.
+
+3) What happens in the workflow
+
+trajectory_rngs = [np.random.default_rng(s) for s in seed_list]
+
+Suppose:
+
+seed_list = [100, 200, 300]
+
+Then:
+
+trajectory_rngs[0]
+trajectory_rngs[1]
+trajectory_rngs[2]
+
+are three completely independent PRNG streams.
+
+Each trajectory therefore has:
+
+its own internal RNG state
+its own deterministic random sequence
+
+So trajectory 0 always gets the same:
+
+rotations
+velocity draws
+any other stochastic initialization
+
+provided:
+
+same NumPy version
+same SciPy version
+same execution order
+4) How numbers are actually produced
+
+For example:
+
+rng.normal(0, 1, size=(N,3))
+
+does not directly generate Gaussian numbers.
+
+Internally:
+
+The PRNG generates uniformly distributed bits
+These are converted into uniform floats in [0,1)
+NumPy transforms them into Gaussian-distributed numbers
+
+Historically:
+
+Box-Muller
+Ziggurat
+inverse transform
+
+Modern NumPy uses optimized vectorized algorithms.
+
+So velocity sampling:
+
+velocities = rng.normal(...)
+
+is mathematically:
+
+v
+i
+	​
+
+∼N(0,σ
+i
+2
+	​
+
+)
+
+with the randomness entirely determined by the RNG state.
+
+5) Why the rotation is reproducible too
+
+Given:
+
+R.random(nrot, random_state=rng)
+
+from SciPy.
+
+SciPy consumes random numbers from the same NumPy Generator.
+
+Internally, SciPy samples:
+
+random quaternions
+or equivalent random rotation parameterizations
+
+using the RNG stream provided.
+
+Thus:
+
+seed_list[b]
+
+fully determines:
+
+orientation
+velocity initialization
+
+because both consume numbers from the same deterministic RNG stream.
+
+6) Important subtlety: order matters
+
+PRNGs are sequential.
+
+Doing:
+
+rng.normal()
+rng.normal()
+
+consumes two random values.
+
+If later we insert another random draw before them:
+
+rng.uniform()
+rng.normal()
+rng.normal()
+
+then all later numbers change.
+
+This is critical in MD workflows.
+
+Even with the same seed:
+
+changing code order
+adding diagnostics
+changing batch logic
+
+can alter all downstream stochastic values.
+
+7) Why separate RNGs per trajectory 
+
+Bad approach:
+
+np.random.seed(123)
+
+globally shared RNG:
+
+fragile
+order-dependent
+hard to parallelize
+
+Code instead does:
+
+trajectory_rngs[b]
+
+per trajectory.
+
+Advantages:
+
+deterministic
+isolated streams
+parallel-safe
+reproducible batch behavior
+
+This is the recommended NumPy practice.
+
+8) One more subtle point: reproducibility across versions
+
+NumPy tries to keep reproducibility stable, but exact streams can change if:
+
+RNG algorithms change
+SciPy rotation implementation changes
+floating-point vectorization changes
+
+So strict bitwise reproducibility is usually only guaranteed with:
+
+fixed NumPy version
+fixed SciPy version
+fixed hardware/backend
+
+For scientific reproducibility, recording:
+
+seed list
+NumPy version
+SciPy version
+
+is generally necessary.
