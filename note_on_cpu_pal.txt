@@ -1,4 +1,4 @@
-When you set device: cpu (or use MARS_DEVICE=cpu), JAX uses all available CPU cores by default for parallel computation. This is why you see pymars using 300% CPU—it means it's using 3 cores (or threads) at full capacity.
+When you set device: cpu, JAX uses all available CPU cores by default for parallel computation. This is why you see pymars using 300% CPU—it means it's using 3 cores (or threads) at full capacity.
 
 Why does this happen?
 

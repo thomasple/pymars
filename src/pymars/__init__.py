@@ -676,6 +676,12 @@ def main() -> None:
                 # Fallback if seed key is missing: append a seed entry at end.
                 content = content.rstrip() + f"\nseed: {int(seed_value)}\n"
 
+            # Ensure SIM input YAML is configured for single-trajectory reruns.
+            # Set the first batch_size entry to 1 (preserving indentation).
+            batch_pattern = re.compile(r"^(\s*)batch_size\s*:\s*.*$", re.MULTILINE)
+            if batch_pattern.search(content):
+                content = batch_pattern.sub(r"\1batch_size: 1", content, count=1)
+
             with open(dst_path, "w", encoding="utf-8") as f:
                 f.write(content)
         except Exception as exc:

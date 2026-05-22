@@ -222,3 +222,8 @@ def test_batch_sim_export_moves_outputs_and_rewrites_seed(tmp_path, monkeypatch)
     seed1 = re.search(r"^\s*seed\s*:\s*(\d+)\s*$", sim1_yaml, flags=re.MULTILINE)
     assert seed0 is not None and seed0.group(1) == "11"
     assert seed1 is not None and seed1.group(1) == "22"
+
+    batch0 = re.search(r"^\s*batch_size\s*:\s*(\d+)\s*$", sim0_yaml, flags=re.MULTILINE)
+    batch1 = re.search(r"^\s*batch_size\s*:\s*(\d+)\s*$", sim1_yaml, flags=re.MULTILINE)
+    assert batch0 is not None and batch0.group(1) == "1"
+    assert batch1 is not None and batch1.group(1) == "1"
