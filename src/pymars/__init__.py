@@ -265,6 +265,50 @@ def main() -> None:
                 start_step = 0
         else:
             print(f"# restart_traj is True but no restart file found among: {candidates}; starting from initial configuration.")
+
+    # --- Initial-state replay/save (dyn.init) ---
+    # If restart_traj is False and dyn.init is present, load it to reproduce the exact initial conditions.
+    # For batch runs, batchdyn.init serves the same purpose and stores all trajectories.
+    def _npz_path(path):
+        return path if path.endswith(".npz") else path + ".npz"
+
+    single_init_base = os.path.join(input_yaml_dir, "dyn.init")
+    batch_init_base = os.path.join(os.getcwd(), "batchdyn.init")
+
+    if not restart_traj:
+        if batch_size == 1:
+            single_init_file = _npz_path(single_init_base)
+            if os.path.exists(single_init_file):
+                print(f"# Loading initial state from {single_init_file}")
+                arr = np.load(single_init_file)
+                coordinates = arr["coordinates"]
+                velocities = arr["velocities"]
+                accelerations = arr["accelerations"]
+                start_step = 0
+        else:
+            batch_init_file = _npz_path(batch_init_base)
+            if os.path.exists(batch_init_file):
+                print(f"# Loading batch initial state from {batch_init_file}")
+                arr = np.load(batch_init_file)
+                coordinates = arr["coordinates"]
+                velocities = arr["velocities"]
+                accelerations = arr["accelerations"]
+                start_step = 0
+
+    # Capture the exact initial state for reproducibility files.
+    init_coords = np.asarray(coordinates)
+    init_vels = np.asarray(velocities)
+    init_accs = np.asarray(accelerations)
+
+    # Save init-state files for reproducibility.
+    if batch_size == 1:
+        single_init_file = _npz_path(single_init_base)
+        np.savez(single_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
+        print(f"# Saved initial state to {single_init_file}")
+    else:
+        batch_init_file = _npz_path(batch_init_base)
+        np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
+        print(f"# Saved batch initial state to {batch_init_file}")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -776,6 +820,15 @@ def main() -> None:
         # For input YAML, rewrite seed to the trajectory-specific seed.
         _copy_input_yaml_with_seed(input_file_abs, sim_dir, trajectory_seeds[i])
         _copy_if_exists(initial_geom_abs, sim_dir)
+
+        # Save per-trajectory initial state for reproducibility.
+        per_init_file = os.path.join(sim_dir, "dyn.init.npz")
+        np.savez(
+            per_init_file,
+            coordinates=np.asarray(init_coords[i]),
+            velocities=np.asarray(init_vels[i]),
+            accelerations=np.asarray(init_accs[i]),
+        )
 
     # Report completion of batch artifact export
     if batch_size > 1:
