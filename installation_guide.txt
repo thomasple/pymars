@@ -1,7 +1,7 @@
 PyMARS GPU/CPU Installation Guide
 ================================
 
-This guide helps you install PyMARS (energy branch) and FeNNol on a shared cluster with both CPU and GPU nodes.
+This guide helps you install PyMARS  and FeNNol on a shared cluster with both CPU and GPU nodes.
 
 ---
 
@@ -29,11 +29,10 @@ This guide helps you install PyMARS (energy branch) and FeNNol on a shared clust
     pip install fennol --no-deps
     pip install numba optax sympy tomlkit pytest flax msgpack rich treescope typing_extensions
 
-5. Clone and install PyMARS (energy branch):
+5. Clone and install PyMARS :
 
     git clone https://github.com/thomasple/pymars.git pymars_new
     cd pymars_new
-    git checkout energy
     pip install -e . --no-deps
     pip install pyyaml ase
     
