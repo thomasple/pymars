@@ -272,6 +272,26 @@ def main() -> None:
     def _npz_path(path):
         return path if path.endswith(".npz") else path + ".npz"
 
+    def _normalize_init_array(arr, batch_size, name):
+        """Normalize init arrays to shape (batch_size, N, 3)."""
+        arr = np.asarray(arr)
+        if arr.ndim == 2:
+            if batch_size == 1:
+                return arr[None, :, :]
+            raise ValueError(
+                f"Loaded {name} has shape {arr.shape} but batch_size is {batch_size}; "
+                "expected a batched array with shape (batch_size, N, 3)."
+            )
+        if arr.ndim == 3:
+            if arr.shape[0] != batch_size:
+                raise ValueError(
+                    f"Loaded {name} batch dimension {arr.shape[0]} does not match batch_size={batch_size}."
+                )
+            return arr
+        raise ValueError(
+            f"Loaded {name} has unexpected shape {arr.shape}; expected (N, 3) or (batch_size, N, 3)."
+        )
+
     single_init_base = os.path.join(input_yaml_dir, "dyn.init")
     batch_init_base = os.path.join(os.getcwd(), "batchdyn.init")
 
@@ -281,18 +301,18 @@ def main() -> None:
             if os.path.exists(single_init_file):
                 print(f"# Loading initial state from {single_init_file}")
                 arr = np.load(single_init_file)
-                coordinates = arr["coordinates"]
-                velocities = arr["velocities"]
-                accelerations = arr["accelerations"]
+                coordinates = _normalize_init_array(arr["coordinates"], batch_size, "coordinates")
+                velocities = _normalize_init_array(arr["velocities"], batch_size, "velocities")
+                accelerations = _normalize_init_array(arr["accelerations"], batch_size, "accelerations")
                 start_step = 0
         else:
             batch_init_file = _npz_path(batch_init_base)
             if os.path.exists(batch_init_file):
                 print(f"# Loading batch initial state from {batch_init_file}")
                 arr = np.load(batch_init_file)
-                coordinates = arr["coordinates"]
-                velocities = arr["velocities"]
-                accelerations = arr["accelerations"]
+                coordinates = _normalize_init_array(arr["coordinates"], batch_size, "coordinates")
+                velocities = _normalize_init_array(arr["velocities"], batch_size, "velocities")
+                accelerations = _normalize_init_array(arr["accelerations"], batch_size, "accelerations")
                 start_step = 0
 
     # Capture the exact initial state for reproducibility files.
