@@ -292,8 +292,9 @@ def main() -> None:
             f"Loaded {name} has unexpected shape {arr.shape}; expected (N, 3) or (batch_size, N, 3)."
         )
 
-    single_init_base = os.path.join(input_yaml_dir, "dyn.init")
-    batch_init_base = os.path.join(os.getcwd(), "batchdyn.init")
+    init_prefix = os.path.splitext(os.path.basename(initial_xyz))[0] if initial_xyz else "traj"
+    single_init_base = os.path.join(input_yaml_dir, f"{init_prefix}.dyn.init")
+    batch_init_base = os.path.join(os.getcwd(), f"{init_prefix}.batchdyn.init")
 
     if not restart_traj:
         if batch_size == 1:
@@ -842,7 +843,7 @@ def main() -> None:
         _copy_if_exists(initial_geom_abs, sim_dir)
 
         # Save per-trajectory initial state for reproducibility.
-        per_init_file = os.path.join(sim_dir, "dyn.init.npz")
+        per_init_file = os.path.join(sim_dir, f"{init_prefix}.dyn.init.npz")
         np.savez(
             per_init_file,
             coordinates=np.asarray(init_coords[i]),

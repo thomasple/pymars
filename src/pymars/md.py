@@ -103,6 +103,8 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     use_x64 = bool(jax.config.read("jax_enable_x64"))
     np_dtype = np.float64 if use_x64 else np.float32
     jnp_dtype = jnp.float64 if use_x64 else jnp.float32
+    if verbose:
+        print(f"# Coordinate dtype: {'float64' if use_x64 else 'float32'}")
 
     # Per-trajectory seeds: expected from __init__.py as general_parameters.seed_list.
     # Fallback to random generation if not provided.
