@@ -25,7 +25,7 @@ def read_initial_configuration(filename):
     return species, coordinates
 
 
-def sample_velocities(species, temperature, rng=None):
+def sample_velocities(species, temperature, rng=None, dtype=None):
     """Sample velocities from Maxwell-Boltzmann distribution at given temperature.
 
     Args:
@@ -44,6 +44,8 @@ def sample_velocities(species, temperature, rng=None):
     velocities = (
         rng.normal(0.0, 1.0, size=(species.shape[0], 3)) * stddev[:, None]
     )
+    if dtype is not None:
+        velocities = velocities.astype(dtype, copy=False)
 
     return velocities
 
@@ -89,7 +91,13 @@ def remove_com_velocity(coordinates, velocities, species):
 
 
 def sample_projectiles(
-    n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18, rng=None
+    n_projectiles,
+    temperature,
+    distance,
+    max_impact_parameter=0.5,
+    projectile_species=18,
+    rng=None,
+    dtype=None,
 ):
     """Sample projectile initial positions and velocities for collision simulations.
 
@@ -107,7 +115,7 @@ def sample_projectiles(
     E = 1.5 * us.K_B * temperature  # average kinetic energy per particle
     mass_projectile = ATOMIC_MASSES[projectile_species] / us.DA  # in amu
     v_magnitude = np.sqrt(2 * E / mass_projectile)
-    projectile_velocities = np.zeros((n_projectiles, 3), dtype=np.float32)
+    projectile_velocities = np.zeros((n_projectiles, 3), dtype=dtype or np.float32)
     projectile_velocities[:, 0] = v_magnitude  # projectiles move along x
 
     if rng is None:
@@ -118,7 +126,7 @@ def sample_projectiles(
     theta = rng.uniform(0, 2 * np.pi, size=n_projectiles)
     y = r * np.cos(theta)
     z = r * np.sin(theta)
-    projectile_positions = np.zeros((n_projectiles, 3), dtype=np.float32)
+    projectile_positions = np.zeros((n_projectiles, 3), dtype=dtype or np.float32)
     projectile_positions[:, 0] = -distance  # start at -distance along x
     projectile_positions[:, 1] = y
     projectile_positions[:, 2] = z
