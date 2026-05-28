@@ -5,7 +5,7 @@ calculation_parameters:
   model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
   double_precision: false             # Use double precision (float64) instead of single (float32). Default: false
   save_initial: true                  # If true, saves the initial configuration as <xyzfilename>.dyn.init.npz or batch version <xyzfilename>.batchdyn.init.npz
-  restart_traj: false                 # If true, continue from <xyzfilename>.dyn.restart if it exists; always saves last state
+  restart_traj: false                 # If true, continue from <xyzfilename>.dyn.restart.npz if it exists; always saves last state
 
 general_parameters:
   temperature: 300.0   # Temperature in Kelvin
