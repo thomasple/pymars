@@ -184,6 +184,30 @@ Ensure pyyaml is installed.
 Then try to run the program: if absl is missing, but flax, optax and rich are present, clear cache (pip cache purge)
  and install optax and rich with dependencies (absl is a dependency of these).
 
+------Troubleshooting deps useful commands to try: (flax, optax, rich)
+	# Install h5py and other problematic packages from conda-forge
+	conda install -c conda-forge h5py tensorstore -y
+
+	# Skip FeNNol and just install pymars with minimal dependencies
+	pip install -e . --no-deps
+	pip install pyyaml ase numpy scipy
+
+	# Install flax WITHOUT the [all] extras (avoids tensorstore rebuild)
+	pip install flax --no-deps
+	pip install msgpack rich treescope typing_extensions
+
+	# Now install fennol without dependencies
+	pip install fennol --no-deps
+
+	# Install remaining fennol dependencies manually
+	pip install numba sympy tomlkit pytest
+	pip install optax PyYAML
+
+	# Finally install pymars
+	cd ~/pymars_new
+	pip install -e . --no-deps
+	pip install pyyaml ase
+
 * alternatively use micromamba packages
 3. AVX runtime errors
 
