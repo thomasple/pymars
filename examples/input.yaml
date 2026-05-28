@@ -4,12 +4,13 @@ calculation_parameters:
   device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
   model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
   double_precision: false             # Use double precision (float64) instead of single (float32). Default: false
+  save_initial: true                  # If true, saves the initial configuration as <xyzfilename>.dyn.init.npz or batch version <xyzfilename>.batchdyn.init.npz
   restart_traj: false                 # If true, continue from <xyzfilename>.dyn.restart if it exists; always saves last state
 
 general_parameters:
   temperature: 300.0   # Temperature in Kelvin
   batch_size: 1        # Number of parallel simulations (trajectories)
-  seed: 12345          # Random seed for reproducibility (0 to 999,999,999). If not set, a random seed is used.
+  seed: 123456789      # Random seed for reproducibility (0 to 999,999,999). If not set, a random seed is used.
   save_steps: 100      # Save trajectory frames every N steps
   save_energy: 100     # Save energy data every N steps
   save_summary: 1000   # Write summary statistics every N steps (must be >= save_energy)
@@ -28,7 +29,7 @@ projectile_parameters:
 
 thermostat_parameters:
   # Currently only NVE (microcanonical, energy-conserving) ensemble is supported
-  NVE_thermostat: true  # Use NVE (microcanonical) ensemble
+  NO_thermostat: true  # Use NVE (microcanonical) ensemble
   # Future thermostat options (not yet implemented):
   # LGV_thermostat: false  # Use Langevin thermostat
   # gamma: 0.0  # Friction constant in THz (for Langevin thermostat)

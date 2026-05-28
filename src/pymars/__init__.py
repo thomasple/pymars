@@ -296,6 +296,9 @@ def main() -> None:
     single_init_base = os.path.join(input_yaml_dir, f"{init_prefix}.dyn.init")
     batch_init_base = os.path.join(os.getcwd(), f"{init_prefix}.batchdyn.init")
 
+    # Allow gating initial-state saving via input flag (default True for backward compatibility).
+    save_initial = bool(input_params.get("save_initial", True))
+
     if not restart_traj:
         if batch_size == 1:
             single_init_file = _npz_path(single_init_base)
@@ -322,14 +325,15 @@ def main() -> None:
     init_accs = np.asarray(accelerations)
 
     # Save init-state files for reproducibility.
-    if batch_size == 1:
-        single_init_file = _npz_path(single_init_base)
-        np.savez(single_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
-        print(f"# Saved initial state to {single_init_file}")
-    else:
-        batch_init_file = _npz_path(batch_init_base)
-        np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
-        print(f"# Saved batch initial state to {batch_init_file}")
+    if save_initial:
+        if batch_size == 1:
+            single_init_file = _npz_path(single_init_base)
+            np.savez(single_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
+            print(f"# Saved initial state to {single_init_file}")
+        else:
+            batch_init_file = _npz_path(batch_init_base)
+            np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
+            print(f"# Saved batch initial state to {batch_init_file}")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -471,7 +475,11 @@ def main() -> None:
     
     # Get thermostat parameters
     thermostat_params = simulation_parameters.get("thermostat_parameters", simulation_parameters)
-    is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
+    if "NO_thermostat" in thermostat_params:
+        is_nve = thermostat_params.get("NO_thermostat", True)
+    else:
+        # Backward compatibility with old name
+        is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
     
     # Prepare summary file(s) if save_summary parameter is set (interval between summary writes in steps)
     # If save_summary is None, summary output is disabled
