@@ -1,7 +1,7 @@
 [project]
 name = "pymars"
 version = "1.3.1"
-description = "Add your description here"
+description = "Dynamics simulations for reactive trajectories"
 readme = "README.md"
 authors = [
     { name = "Thomas Plé", email = "thomas.ple@sorbonne-universite.fr" },
