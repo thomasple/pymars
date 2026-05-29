@@ -207,7 +207,7 @@ def main() -> None:
 
     print(f"# NumPy version: {np.__version__}")
     print(f"# SciPy version: {scipy_version}")
-    print(f"# PyMARS version: {jax.__version__}")
+    print(f"# PyMARS version: 1.3.1")  # Update this manually when bumping version in pyproject.toml 
     print(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
