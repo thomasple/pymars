@@ -207,6 +207,7 @@ def main() -> None:
 
     print(f"# NumPy version: {np.__version__}")
     print(f"# SciPy version: {scipy_version}")
+    print(f"# PyMARS version: {jax.__version__}")
     print(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
