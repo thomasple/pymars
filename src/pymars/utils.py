@@ -2,6 +2,7 @@ from fennol.utils.atomic_units import UnitSystem
 from fennol.utils.periodic_table import PERIODIC_TABLE
 import numpy as np
 import jax.numpy as jnp
+import jax
 
 __all__ = ['us','format_batch_conformations','update_conformation','get_composition_string']
 
@@ -25,12 +26,14 @@ def format_batch_conformations(species,coordinates,total_charge=0):
     coordinates_batch = coordinates.reshape(-1, 3)  # (M * Nat, 3)
     batch_index = np.repeat(np.arange(batch_size,dtype=np.int32), Nat)  # (M * Nat,)
     natoms_batch = np.array([Nat] * batch_size,dtype=np.int32)  # list of length M
+    use_x64 = bool(jax.config.read("jax_enable_x64"))
+    coord_dtype = jnp.float64 if use_x64 else jnp.float32
     return {
-        'species': jnp.array(species_batch,dtype=jnp.int32),
-        'coordinates': jnp.array(coordinates_batch,dtype=jnp.float32),
-        'natoms': jnp.array(natoms_batch,dtype=jnp.int32),
-        'batch_index': jnp.array(batch_index,dtype=jnp.int32),
-        'total_charge': jnp.array([total_charge]*batch_size,dtype=jnp.int32),
+        'species': jnp.array(species_batch, dtype=jnp.int32),
+        'coordinates': jnp.array(coordinates_batch, dtype=coord_dtype),
+        'natoms': jnp.array(natoms_batch, dtype=jnp.int32),
+        'batch_index': jnp.array(batch_index, dtype=jnp.int32),
+        'total_charge': jnp.array([total_charge] * batch_size, dtype=jnp.int32),
     }
 
 def update_conformation(conformation, new_coordinates):
@@ -42,7 +45,9 @@ def update_conformation(conformation, new_coordinates):
     Returns:
      - updated_conformation: dict with updated 'coordinates'
     """
-    return {**conformation, 'coordinates': jnp.asarray(new_coordinates.reshape(-1,3),dtype=jnp.float32)}
+    use_x64 = bool(jax.config.read("jax_enable_x64"))
+    coord_dtype = jnp.float64 if use_x64 else jnp.float32
+    return {**conformation, 'coordinates': jnp.asarray(new_coordinates.reshape(-1,3),dtype=coord_dtype)}
 
 def get_composition_string(species):
     """Get a string representation of the composition from species array.

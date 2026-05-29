@@ -81,7 +81,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     elif isinstance(geometry, dict):
         # load directly from dict
         species = np.array(geometry["species"], dtype=np.int32)
-        coordinates = np.array(geometry["coordinates"], dtype=np.float32).reshape(-1, 3)
+        coordinates = np.array(geometry["coordinates"], dtype=np_dtype).reshape(-1, 3)
     else:
         raise ValueError("initial_geometry must be a file path or a dictionary")
 
@@ -98,6 +98,13 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     # Single trajectory per batch_size element; all run in parallel with JAX vectorization
     batch_size = general_params.get("batch_size", 1)
     assert batch_size >= 1, "batch_size must be at least 1"
+
+    # Dtypes follow the double-precision flag configured in __init__.py.
+    use_x64 = bool(jax.config.read("jax_enable_x64"))
+    np_dtype = np.float64 if use_x64 else np.float32
+    jnp_dtype = jnp.float64 if use_x64 else jnp.float32
+    if verbose:
+        print(f"# Coordinate dtype: {'float64' if use_x64 else 'float32'}")
 
     # Per-trajectory seeds: expected from __init__.py as general_parameters.seed_list.
     # Fallback to random generation if not provided.
@@ -129,7 +136,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         coordinates = np.stack(
             [apply_random_rotation(coordinates, n_rotations=None, rng=trajectory_rngs[b]) for b in range(batch_size)],
             axis=0,
-        ).astype(np.float32, copy=False)
+        ).astype(np_dtype, copy=False)
         if verbose:
             print("# Applied random rotation to initial configuration.")
     else:
@@ -141,9 +148,9 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     temperature = general_params.get("temperature", 0.0)  # Kelvin
     assert temperature >= 0.0, "Temperature must be non-negative"
     velocities = np.stack(
-        [sample_velocities(species, temperature, rng=trajectory_rngs[b]) for b in range(batch_size)],
+        [sample_velocities(species, temperature, rng=trajectory_rngs[b], dtype=np_dtype) for b in range(batch_size)],
         axis=0,
-    ).astype(np.float32, copy=False)  # (batch_size,N,3)
+    ).astype(np_dtype, copy=False)  # (batch_size,N,3)
     if verbose:
         print(f"# Sampled velocities at T={temperature} K.")
 
@@ -176,8 +183,8 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         ))  # Kelvin
         assert projectile_temperature > 0.0, "projectile_temperature must > 0 K"
         # Sample batch_size independent projectile trajectories, one RNG per trajectory.
-        projectile_coordinates = np.zeros((batch_size, 3), dtype=np.float32)
-        projectiles_velocities = np.zeros((batch_size, 3), dtype=np.float32)
+        projectile_coordinates = np.zeros((batch_size, 3), dtype=np_dtype)
+        projectiles_velocities = np.zeros((batch_size, 3), dtype=np_dtype)
         for b in range(batch_size):
             pcoords_b, pvels_b = sample_projectiles(
                 1,
@@ -186,6 +193,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 projectile_species=projectile_species,
                 max_impact_parameter=max_impact_parameter,
                 rng=trajectory_rngs[b],
+                dtype=np_dtype,
             )
             projectile_coordinates[b] = pcoords_b[0]
             projectiles_velocities[b] = pvels_b[0]
@@ -309,7 +317,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     # Preprocess initial conformation for the model (batches normalizations, padding, etc.)
     conformation = model.preprocess(use_gpu=True, **initial_conformation)
     # Ensure full_coordinates passed as jnp arrays to energy/force function
-    full_coordinates_jnp = jnp.array(full_coordinates, dtype=jnp.float32)
+    full_coordinates_jnp = jnp.array(full_coordinates, dtype=jnp_dtype)
     energies, forces, _ = total_energies_and_forces(full_coordinates_jnp, conformation)
     accelerations = forces / masses  # (batch_size, N(+1), 3) depending on collision
 
@@ -504,7 +512,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         "species": full_species,
         "masses": masses_np,
         "coordinates": full_coordinates_jnp,
-        "velocities": jnp.array(full_velocities,dtype=jnp.float32),
+        "velocities": jnp.array(full_velocities, dtype=jnp_dtype),
         "accelerations": accelerations,
         "total_energies_and_forces": total_energies_and_forces,
         "integrate": integrate,

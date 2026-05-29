@@ -3,24 +3,25 @@
 calculation_parameters:
   device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
   model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
-  double_precision: false             # Use double precision (float64) instead of single (float32). Default: false
-  restart_traj: false                 # If true, continue from <xyzfilename>.dyn.restart if it exists; always saves last state
+  double_precision: true              # Use double precision (float64) instead of single (float32). Default: false
+  save_initial: false                 # If true, saves the initial configuration as <xyzfilename>.dyn.init.npz or batch version <xyzfilename>.batchdyn.init.npz
+  restart_traj: false                 # If true, continue from <xyzfilename>.dyn.restart.npz if it exists; always saves last state
 
 general_parameters:
   temperature: 300.0   # Temperature in Kelvin
   batch_size: 1        # Number of parallel simulations (trajectories)
-  seed: 12345          # Random seed for reproducibility (0 to 999,999,999). If not set, a random seed is used.
-  save_steps: 100      # Save trajectory frames every N steps
+  seed: 123456789      # Random seed for reproducibility (0 to 999,999,999). If not set, a random seed is used.
+  save_steps: 10       # Save trajectory frames every N steps
   save_energy: 100     # Save energy data every N steps
   save_summary: 1000   # Write summary statistics every N steps (must be >= save_energy)
 
 input_parameters:
   initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
   total_charge: 0                        # Total molecular charge
-  random_rotation: true                  # Apply random rotation to initial configuration
+  random_rotation: false                 # Apply random rotation to initial configuration
 
 projectile_parameters:
-  projectile_flag: true           # Enable projectile collision simulation
+  projectile_flag: false          # Enable projectile collision simulation
   projectile_species: 18          # Atomic number (18 = Argon)
   projectile_temperature: 3000.0  # Projectile temperature in Kelvin
   projectile_distance: 20.0       # Initial projectile distance in angstrom
@@ -28,14 +29,14 @@ projectile_parameters:
 
 thermostat_parameters:
   # Currently only NVE (microcanonical, energy-conserving) ensemble is supported
-  NVE_thermostat: true  # Use NVE (microcanonical) ensemble
+  NO_thermostat: true  # Use NVE (microcanonical) ensemble
   # Future thermostat options (not yet implemented):
   # LGV_thermostat: false  # Use Langevin thermostat
   # gamma: 0.0  # Friction constant in THz (for Langevin thermostat)
 
 dynamic_parameters:
   dt_dyn: 1.0      # Timestep in femtoseconds (fs)
-  step_dyn: 10000  # Total number of MD steps
+  step_dyn: 2000   # Total number of MD steps
 
 output_details:
   trajectory_file: "trajectory.xyz"  # Output trajectory file

@@ -207,6 +207,7 @@ def main() -> None:
 
     print(f"# NumPy version: {np.__version__}")
     print(f"# SciPy version: {scipy_version}")
+    print(f"# PyMARS version: 1.3.1")  # Update this manually when bumping version in pyproject.toml 
     print(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
@@ -265,6 +266,75 @@ def main() -> None:
                 start_step = 0
         else:
             print(f"# restart_traj is True but no restart file found among: {candidates}; starting from initial configuration.")
+
+    # --- Initial-state replay/save (dyn.init) ---
+    # If restart_traj is False and dyn.init is present, load it to reproduce the exact initial conditions.
+    # For batch runs, batchdyn.init serves the same purpose and stores all trajectories.
+    def _npz_path(path):
+        return path if path.endswith(".npz") else path + ".npz"
+
+    def _normalize_init_array(arr, batch_size, name):
+        """Normalize init arrays to shape (batch_size, N, 3)."""
+        arr = np.asarray(arr)
+        if arr.ndim == 2:
+            if batch_size == 1:
+                return arr[None, :, :]
+            raise ValueError(
+                f"Loaded {name} has shape {arr.shape} but batch_size is {batch_size}; "
+                "expected a batched array with shape (batch_size, N, 3)."
+            )
+        if arr.ndim == 3:
+            if arr.shape[0] != batch_size:
+                raise ValueError(
+                    f"Loaded {name} batch dimension {arr.shape[0]} does not match batch_size={batch_size}."
+                )
+            return arr
+        raise ValueError(
+            f"Loaded {name} has unexpected shape {arr.shape}; expected (N, 3) or (batch_size, N, 3)."
+        )
+
+    init_prefix = os.path.splitext(os.path.basename(initial_xyz))[0] if initial_xyz else "traj"
+    single_init_base = os.path.join(input_yaml_dir, f"{init_prefix}.dyn.init")
+    batch_init_base = os.path.join(os.getcwd(), f"{init_prefix}.batchdyn.init")
+
+    # Allow gating initial-state saving via input flag (default True for backward compatibility).
+    save_initial = bool(input_params.get("save_initial", True))
+
+    if not restart_traj:
+        if batch_size == 1:
+            single_init_file = _npz_path(single_init_base)
+            if os.path.exists(single_init_file):
+                print(f"# Loading initial state from {single_init_file}")
+                arr = np.load(single_init_file)
+                coordinates = _normalize_init_array(arr["coordinates"], batch_size, "coordinates")
+                velocities = _normalize_init_array(arr["velocities"], batch_size, "velocities")
+                accelerations = _normalize_init_array(arr["accelerations"], batch_size, "accelerations")
+                start_step = 0
+        else:
+            batch_init_file = _npz_path(batch_init_base)
+            if os.path.exists(batch_init_file):
+                print(f"# Loading batch initial state from {batch_init_file}")
+                arr = np.load(batch_init_file)
+                coordinates = _normalize_init_array(arr["coordinates"], batch_size, "coordinates")
+                velocities = _normalize_init_array(arr["velocities"], batch_size, "velocities")
+                accelerations = _normalize_init_array(arr["accelerations"], batch_size, "accelerations")
+                start_step = 0
+
+    # Capture the exact initial state for reproducibility files.
+    init_coords = np.asarray(coordinates)
+    init_vels = np.asarray(velocities)
+    init_accs = np.asarray(accelerations)
+
+    # Save init-state files for reproducibility.
+    if save_initial:
+        if batch_size == 1:
+            single_init_file = _npz_path(single_init_base)
+            np.savez(single_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
+            print(f"# Saved initial state to {single_init_file}")
+        else:
+            batch_init_file = _npz_path(batch_init_base)
+            np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
+            print(f"# Saved batch initial state to {batch_init_file}")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -406,7 +476,11 @@ def main() -> None:
     
     # Get thermostat parameters
     thermostat_params = simulation_parameters.get("thermostat_parameters", simulation_parameters)
-    is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
+    if "NO_thermostat" in thermostat_params:
+        is_nve = thermostat_params.get("NO_thermostat", True)
+    else:
+        # Backward compatibility with old name
+        is_nve = thermostat_params.get("NVE_thermostat", True)  # Default to NVE
     
     # Prepare summary file(s) if save_summary parameter is set (interval between summary writes in steps)
     # If save_summary is None, summary output is disabled
@@ -776,6 +850,15 @@ def main() -> None:
         # For input YAML, rewrite seed to the trajectory-specific seed.
         _copy_input_yaml_with_seed(input_file_abs, sim_dir, trajectory_seeds[i])
         _copy_if_exists(initial_geom_abs, sim_dir)
+
+        # Save per-trajectory initial state for reproducibility.
+        per_init_file = os.path.join(sim_dir, f"{init_prefix}.dyn.init.npz")
+        np.savez(
+            per_init_file,
+            coordinates=np.asarray(init_coords[i]),
+            velocities=np.asarray(init_vels[i]),
+            accelerations=np.asarray(init_accs[i]),
+        )
 
     # Report completion of batch artifact export
     if batch_size > 1:
