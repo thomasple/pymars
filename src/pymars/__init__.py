@@ -2,19 +2,100 @@ import argparse
 import yaml
 import numpy as np
 import os
+import sys
 import time
 import re
 import shutil
 import platform
+from importlib.metadata import version
+__version__ = version("pymars")
 
 __all__ = []
 
+def print_version_info() -> None:
+    import sys
+    import platform
+    from importlib.metadata import version as pkg_version, PackageNotFoundError
+
+    # --- pymars ---
+    try:
+        pymars_ver = pkg_version("pymars")
+    except PackageNotFoundError:
+        pymars_ver = "unknown"
+    install_path = os.path.dirname(os.path.abspath(__file__))
+
+    # --- Python ---
+    python_ver = sys.version.replace("\n", " ")
+
+    # --- numpy ---
+    try:
+        import numpy as np
+        numpy_ver = np.__version__
+    except ImportError:
+        numpy_ver = "not installed"
+
+    # --- scipy ---
+    try:
+        import scipy
+        scipy_ver = scipy.__version__
+    except ImportError:
+        scipy_ver = "not installed"
+
+    # --- jax ---
+    try:
+        import jax
+        jax_ver = jax.__version__
+    except ImportError:
+        jax_ver = "not installed"
+
+    # --- Hardware: OS/platform ---
+    os_info = platform.platform()
+    cpu_info = platform.processor() or platform.machine()
+    cpu_count_physical = os.cpu_count()  # logical cores
+
+    # --- Hardware: RAM ---
+    try:
+        import psutil
+        ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+        ram_str = f"{ram_gb:.1f} GB"
+    except ImportError:
+        ram_str = "unknown (install psutil)"
+
+    # --- Hardware: GPU via JAX ---
+    gpu_str = "none detected"
+    try:
+        import jax
+        gpu_devices = [d for d in jax.devices() if d.platform != "cpu"]
+        if gpu_devices:
+            gpu_str = ", ".join(str(d) for d in gpu_devices)
+        else:
+            gpu_str = "none (JAX sees CPU only)"
+    except Exception:
+        gpu_str = "unknown (JAX unavailable)"
+
+    print(f"pymars version   : {pymars_ver}")
+    print(f"installation path: {install_path}")
+    print(f"")
+    print(f"Python           : {python_ver}")
+    print(f"numpy            : {numpy_ver}")
+    print(f"scipy            : {scipy_ver}")
+    print(f"jax              : {jax_ver}")
+    print(f"")
+    print(f"OS/platform      : {os_info}")
+    print(f"CPU              : {cpu_info} ({cpu_count_physical} logical cores)")
+    print(f"RAM              : {ram_str}")
+    print(f"GPU              : {gpu_str}")
+
 def main() -> None:
+    # Handle --version early, before argparse demands input_file
+    if "--version" in sys.argv:
+        print_version_info()
+        sys.exit(0)
+
     # Print installed package path (directory containing this __init__.py module).
     print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
     # Print execution folder (working directory where the command is run, which may differ from installation path).
     print(f"# Running from folder: {os.getcwd()}")
-
     parser = argparse.ArgumentParser(
         description="pymars: A molecular collision simulation package"
     )
@@ -52,7 +133,7 @@ def main() -> None:
     restart_file = os.path.join(input_yaml_dir, restart_file_name)
     # Also show the name of the restart file
     # (useful when working directories or folder names change)
-    print(f"# Restart file will be: {restart_file_name}")
+    print(f"# Restart file will be: {restart_file_name}.npz")
 
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
@@ -108,7 +189,6 @@ def main() -> None:
         print("# Detailed error information:")
         import traceback
         traceback.print_exc()
-        import sys
         sys.exit(1)
 
     jax.config.update("jax_default_device", _device)
@@ -207,7 +287,7 @@ def main() -> None:
 
     print(f"# NumPy version: {np.__version__}")
     print(f"# SciPy version: {scipy_version}")
-    print(f"# PyMARS version: 1.3.1")  # Update this manually when bumping version in pyproject.toml 
+    print(f"# PyMARS version: {__version__}")  
     print(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
@@ -867,7 +947,6 @@ def main() -> None:
             f"SIM{start_sim:05d}..SIM{start_sim + batch_size - 1:05d}"
         )
         #print("# [BATCH_DEBUG] batch artifact export phase completed")
-
 
 if __name__ == "__main__":
     main()
