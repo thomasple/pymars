@@ -12,6 +12,73 @@ __version__ = version("pymars")
 
 __all__ = []
 
+
+class _Tee:
+    """File-like object that writes to multiple streams at once.
+
+    Used to mirror stdout to both the terminal and an on-disk log file
+    (e.g. <prefix>.out), without requiring the user to redirect manually.
+    """
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+            s.flush()
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def _next_indexed_path(path):
+    """Return the path a NEW run should write to for a file that must not be
+    overwritten by successive batch runs in the same directory.
+
+    Rule:
+      - If neither the plain (unindexed) file nor any '<root>_N<ext>' indexed
+        variant exists yet: return the plain path unchanged (first run).
+      - If the plain file exists but no indexed variant exists yet: rename
+        the plain file to '<root>_0<ext>' (demoting it to history), then
+        return '<root>_1<ext>' for the new run to write to.
+      - If one or more indexed variants already exist: leave all existing
+        files (plain or indexed) untouched, and return '<root>_{max+1}<ext>'
+        for the new run to write to.
+
+    The plain/unindexed name is therefore only ever used for the very first
+    run; once any collision has occurred, it is never reused, and indexed
+    files are frozen history (never auto-loaded or overwritten).
+    """
+    root, ext = os.path.splitext(path)
+    directory = os.path.dirname(root) or "."
+    base_root = os.path.basename(root)
+
+    pattern = re.compile(rf"^{re.escape(base_root)}_(\d+){re.escape(ext)}$")
+    existing_indices = []
+    if os.path.isdir(directory):
+        for name in os.listdir(directory):
+            m = pattern.match(name)
+            if m:
+                existing_indices.append(int(m.group(1)))
+
+    plain_exists = os.path.isfile(path)
+
+    if not plain_exists and not existing_indices:
+        # First run: nothing to protect.
+        return path
+
+    if plain_exists and not existing_indices:
+        # Demote the existing plain file to index 0, new run takes index 1.
+        demoted_path = os.path.join(directory, f"{base_root}_0{ext}")
+        shutil.move(path, demoted_path)
+        return os.path.join(directory, f"{base_root}_1{ext}")
+
+    # Indexed variants already exist: new run claims the next free index.
+    next_index = max(existing_indices) + 1
+    return os.path.join(directory, f"{base_root}_{next_index}{ext}")
+
+
 def print_version_info() -> None:
     import sys
     import platform
@@ -92,10 +159,6 @@ def main() -> None:
         print_version_info()
         sys.exit(0)
 
-    # Print installed package path (directory containing this __init__.py module).
-    print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
-    # Print execution folder (working directory where the command is run, which may differ from installation path).
-    print(f"# Running from folder: {os.getcwd()}")
     parser = argparse.ArgumentParser(
         description="pymars: A molecular collision simulation package"
     )
@@ -106,7 +169,40 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
-    
+
+    # --- Set up internal logging to <prefix>.out as early as possible, so that
+    # essentially all terminal output (starting with the very first print below)
+    # is also captured to disk, without requiring the user to redirect manually.
+    # <prefix> is derived from input_parameters.initial_geometry (e.g. "aspirin.xyz"
+    # -> "aspirin.out"), falling back to "traj.out" if no geometry is configured.
+    # For batch_size > 1, successive runs in the same directory get this log file
+    # protected from being overwritten via the same indexing scheme used for the
+    # restart and dyn.init files below (first run: plain name; subsequent runs:
+    # the old file is demoted to _0 and new runs claim the next free _N).
+    input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
+    _early_calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)
+    _early_input_params = simulation_parameters.get("input_parameters", {})
+    _early_general_params = simulation_parameters.get("general_parameters", simulation_parameters)
+    _early_initial_xyz = _early_input_params.get("initial_geometry", None)
+    if _early_initial_xyz:
+        _log_prefix = os.path.splitext(os.path.basename(_early_initial_xyz))[0]
+    else:
+        _log_prefix = "traj"
+    _early_batch_size = int(_early_general_params.get("batch_size", 1))
+
+    log_file_path = os.path.join(input_yaml_dir, f"{_log_prefix}.out")
+    if _early_batch_size > 1:
+        log_file_path = _next_indexed_path(log_file_path)
+    _log_fh = open(log_file_path, "a")
+    sys.stdout = _Tee(sys.__stdout__, _log_fh)
+    sys.stderr = _Tee(sys.__stderr__, _log_fh)
+    print(f"# Logging terminal output to: {log_file_path}")
+
+    # Print installed package path (directory containing this __init__.py module).
+    print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
+    # Print execution folder (working directory where the command is run, which may differ from installation path).
+    print(f"# Running from folder: {os.getcwd()}")
+
     # Set FENNOL_MODULES_PATH BEFORE any fennol imports
     # This must be done before importing utils (which imports fennol) and md (which imports fennol)
     calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)
@@ -129,7 +225,6 @@ def main() -> None:
     restart_traj = bool(calc_params.get("restart_traj", False))
 
     # Determine restart file path: place the restart file next to the input YAML
-    input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
     restart_file = os.path.join(input_yaml_dir, restart_file_name)
     # Also show the name of the restart file
     # (useful when working directories or folder names change)
@@ -413,6 +508,9 @@ def main() -> None:
             print(f"# Saved initial state to {single_init_file}")
         else:
             batch_init_file = _npz_path(batch_init_base)
+            # Protect a previous run's batchdyn.init from being overwritten:
+            # demote it to an indexed name (or claim the next free index).
+            batch_init_file = _next_indexed_path(batch_init_file)
             np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
             print(f"# Saved batch initial state to {batch_init_file}")
     
@@ -741,6 +839,10 @@ def main() -> None:
 
     # Ensure we know the exact filename np.savez will create
     restart_save_file = restart_file if restart_file.endswith(".npz") else restart_file + ".npz"
+    if batch_size > 1:
+        # Protect a previous run's restart file from being overwritten: demote it
+        # to an indexed name (or claim the next free index) before writing anew.
+        restart_save_file = _next_indexed_path(restart_save_file)
     np.savez(restart_save_file,
         coordinates=save_coords,
         velocities=save_vels,
@@ -950,7 +1052,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-
