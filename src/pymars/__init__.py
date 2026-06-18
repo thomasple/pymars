@@ -378,7 +378,7 @@ def main() -> None:
     batch_init_base = os.path.join(os.getcwd(), f"{init_prefix}.batchdyn.init")
 
     # Allow gating initial-state saving via input flag (default True for backward compatibility).
-    save_initial = bool(input_params.get("save_initial", True))
+    save_initial = bool(calc_params.get("save_initial", True))
 
     if not restart_traj:
         if batch_size == 1:
