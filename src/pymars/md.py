@@ -428,8 +428,9 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         temperatures = (2.0 * kinetic_energies) / (3.0 * N_atoms * k_B)
         
         # Convert time to femtoseconds and determine output precision based on dt
-        time_fs = step * dt * 1000.0  # dt is in ps, convert to fs
         dt_fs = dt * 1000.0  # Convert dt from ps to fs
+        time_fs = step * dt_fs # time = step * dt in fs
+
         # If dt >= 1 fs, output no decimals; otherwise output appropriate decimals
         if dt_fs >= 1.0:
             time_decimals = 0

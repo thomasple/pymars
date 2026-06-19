@@ -148,7 +148,7 @@ config = {
         'max_impact_parameter': 1.0,
     },
     'thermostat_parameters': {
-        'NVE_thermostat': True,
+        'NO_thermostat': True,
         'LGV_thermostat': False,
         'gamma': 0.0,
     },
@@ -284,9 +284,101 @@ API summary
   - `us` — unit system (L=angstrom, T=ps, E=kcal/mol)
   - helpers to format batched conformations used by FeNNol models.
 
+Initial state saving and reproducibility
+------------------------------------------
+
+Initial conditions replay (batch → single trajectory)
+: When running batch simulations (`batch_size > 1`), pymars saves the exact initial conditions (positions, velocities, accelerations) for each trajectory:
+- **Single trajectory**: saved to `<xyzfilename>.dyn.init.npz` in the simulation folder
+- **Batch**: saved to `<xyzfilename>.batchdyn.init.npz` in the parent directory
+
+These files are controlled by the `save_initial` flag (default `true`). When set to `false`, no initial state files are written.
+
+To reproduce a single trajectory from a batch run:
+1. Locate the trajectory's `<xyzfilename>.dyn.init.npz` file in its `SIMXXXXX` folder
+2. Run with `batch_size: 1` and the per-trajectory seed; pymars will automatically load the saved initial state (when `restart_traj: false`)
+3. This ensures bit-identical initial conditions
+
+**Important note**: Floating-point arithmetic depends on batch shape (batch_size). Running a trajectory extracted from a batch with `batch_size: 1` will have slightly different numerical paths due to:
+- Different vectorization order in JAX/NumPy operations
+- Different floating-point reduction sequences
+
+For bit-wise reproducibility across trajectories and batches, use `save_initial: true` (default).
+
+Seeding and random number generation
+: pymars uses NumPy's modern Generator API (`np.random.default_rng(seed)`) with per-trajectory seeding:
+
+**Seed configuration**:
+- User provides one seed per trajectory via `general_parameters.seed`:
+  - Single scalar (for `batch_size: 1`) → used directly
+  - List/tuple/array → one seed per trajectory (must match batch_size)
+  - Comma-separated string (for batch runs) → split into per-trajectory seeds
+  - Missing/`null` → random unique seeds are generated per trajectory
+- For batch runs (`batch_size > 1`), all seeds must be **unique**; duplicates in user-provided lists trigger an error; duplicates in auto-generated lists are regenerated
+- Output logs print the resolved per-trajectory seed list for reference
+
+**How seeds are used**:
+Each trajectory gets its own NumPy Generator seeded with `seed_list[b]`. This RNG drives:
+- Random orientation sampling (via `scipy.spatial.transform.Rotation.random(..., random_state=rng_b)`)
+- Initial velocity sampling (Maxwell–Boltzmann via `rng_b.normal(...)`)
+- Projectile initial conditions sampling
+- Any other stochastic initialization
+
+Same seed → identical internal RNG state → **identical random sequences** (assuming same NumPy/SciPy versions and execution order).
+
+**NumPy Generator details**:
+Modern NumPy (`>= 1.17`) uses `Generator(PCG64)` by default:
+- `np.random.default_rng(seed)` creates a Generator with a PCG64 BitGenerator
+- The seed is used to initialize the BitGenerator's internal state
+- Each call to the RNG (e.g., `.normal()`, `.uniform()`) applies deterministic transformations to the internal state
+- Same seed → same state sequence → identical outputs
+
+**Important**: The old global seed API (`np.random.seed(...)`) is not used; all randomness is seeded per-trajectory via independent Generator instances.
+
+**Reproducibility metadata**:
+At startup, pymars prints:
+- NumPy version and SciPy version
+- Hardware/platform info (OS, release, machine, processor)
+
+Recording these alongside your seed list ensures **full reproducibility** across machines and time:
+
+```
+# Per-trajectory seeds:
+# trajectory         seed
+#          0    1234567890
+# NumPy version: 1.26.4
+# SciPy version: 1.11.4
+# Hardware: Linux 5.15.0-1234 x86_64 | processor=Intel(R) Core(TM) i7-11700K AT
+# Coordinate dtype: float32
+```
+
+**Note on reproducibility across batch sizes**: Different batch sizes lead to different JAX/NumPy vectorization paths and floating-point reduction orders, even with identical seeds. For guaranteed numerical reproducibility, use identical batch sizes and versions.
+
+Floating-point precision
+: By default, pymars uses single precision (float32) for coordinates, velocities, and rotations. Set `calculation_parameters.double_precision: true` to use float64:
+
+```yaml
+calculation_parameters:
+  double_precision: true  # Use float64 for coordinates and velocities
+```
+
+Masses and atomic species remain in float32 for efficiency. The flag is printed at runtime:
+```
+# Coordinate dtype: float64
+```
+
+**Note**: Double precision reduces but does not eliminate numerical divergence in chaotic dynamics (MD trajectories). For guaranteed reproducibility, use identical batch shapes and NumPy/SciPy versions.
+
+Program output:
+the program implements internal logging to a file called <input structure filename>.out
+
 Notes on units
 - Lengths are in angstroms, time in picoseconds (ps), energies in kcal/mol — see `pymars.utils.us` for the unit system used across the code.
 - default units in the configuration YAML are expected to be in the unit system (A, ps, kcal/mol); e.g., time step `dt: 0.001` corresponds to 1 fs. Input units can be specified explicitly in the YAML keys (e.g., `dt[fs]: 1.0`).
+
+Thermostat configuration
+- `thermostat_parameters.NO_thermostat: true` (default) — use NVE (microcanonical, energy-conserving) ensemble
+- The old name `NVE_thermostat` is still supported for backward compatibility but `NO_thermostat` is preferred
 
 Testing
 
@@ -298,7 +390,7 @@ pytest -v
 
 The `tests/` directory contains simple, focused tests that also serve as usage examples:
 - `tests/aspirin.xyz` — small sample geometry used in the tests.
-- `tests/test_batch_sim_export.py` — regression test for batch SIM folder creation, artifact organization, and per-trajectory seed rewriting in copied input YAML.
+- `tests/test_batch_sim_export.py` — regression test for batch SIM folder creation, artifact organization, per-trajectory seed rewriting, and initial state file handling (`<prefix>.dyn.init.npz`).
 
 Development & contributing
 - Please open issues or pull requests for new features or bug fixes.
