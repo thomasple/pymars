@@ -62,3 +62,20 @@ def get_composition_string(species):
         f"{PERIODIC_TABLE[int(s)]}{int(n)}" for s, n in zip(species_set, counts)
     )
     return composition_str
+
+
+def write_xyz_frame(f, symbols, coordinates, charges=None, **kwargs):
+    nat = len(symbols)
+    f.write(f"{nat}\n")
+    f.write("\n")
+    for i in range(nat):
+        if charges is not None:
+            #print(f"DEBUG: charges: {charges}")
+            f.write(
+                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}   {charges[i]}\n"
+            )
+        else:
+            f.write(
+                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}\n"
+            )
+    f.flush()

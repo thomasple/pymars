@@ -414,6 +414,7 @@ def main() -> None:
     coordinates = system["coordinates"]
     velocities = system["velocities"]
     accelerations = system["accelerations"]
+    charges = system.get("charges", None)
     species = system["species"]
     masses = system["masses"]
     batch_size = system["batch_size"]
@@ -547,7 +548,7 @@ def main() -> None:
     write_traj = traj_file.lower() != "none"
     if write_traj:
         assert traj_file.endswith(".xyz"), "Only .xyz output format is supported currently."
-        from fennol.utils.io import write_xyz_frame
+        from .utils import write_xyz_frame
         if batch_size ==1:
             traj_paths = [traj_file]
             ftraj = [open(traj_paths[0], "w")]
@@ -684,7 +685,7 @@ def main() -> None:
         print(header)
 
     for istep in range(start_step, n_steps):
-        coordinates, velocities, accelerations, energies, energy_data, frame_variance = integrate(
+        coordinates, velocities, accelerations, energies, energy_data, charges, frame_variance = integrate(
             coordinates, velocities, accelerations,
             step=istep,
             energy_output_file=energy_files if energy_file else None,
@@ -733,6 +734,7 @@ def main() -> None:
                         ftraj[i],
                         element_symbols,
                         coords[i],
+                        charges if 'charges' in system else None,
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
         
