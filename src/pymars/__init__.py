@@ -7,8 +7,11 @@ import time
 import re
 import shutil
 import platform
-from importlib.metadata import version
-__version__ = version("pymars")
+from importlib.metadata import version, PackageNotFoundError
+try:
+    __version__ = version("pymars")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 __all__ = []
 
@@ -691,7 +694,7 @@ def main() -> None:
             energy_output_file=energy_files if energy_file else None,
             energy_steps=save_energy
         )
-
+        #print(f"DEBUG: charges={charges}, charges.shape={charges.shape if charges is not None else None}, coordinates.shape={coordinates.shape}, accelerations.shape={accelerations.shape}")
         # Collect energy data for summary statistics
         if energy_data is not None:
             energy_history.append(energy_data)
@@ -734,7 +737,7 @@ def main() -> None:
                         ftraj[i],
                         element_symbols,
                         coords[i],
-                        charges if 'charges' in system else None,
+                        charges[i] if 'charges' in system else None,
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
         

@@ -257,10 +257,19 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             
             #Extract per-frame ensemble charges if model provides it (units: e). 
             # Always return a JAX array sentinel when missing so JIT tracing remains stable.
+            # In collision mode the model sees only target atoms (projectile excluded),
+            # so pad a NaN charge for the projectile at index 0 to keep shapes consistent.
             if isinstance(aux, dict) and "charges" in aux:
-                charges = aux["charges"]
+                    model_charges = aux["charges"].reshape(
+                    coordinates_model.shape[0],
+                    coordinates_model.shape[1]
+                    ) # (batch_size, N_target)
+                    full_charges = jnp.concatenate(
+                    [jnp.full((full_coordinates.shape[0], 1), jnp.nan, dtype=model_charges.dtype), model_charges],
+                    axis=1,
+                    )  # (batch_size, N_target+1)
             else:
-                charges = jnp.full((full_coordinates.shape[0], full_coordinates.shape[1]), jnp.nan)  # (batch_size, N)
+                full_charges = jnp.full((full_coordinates.shape[0], full_coordinates.shape[1]), jnp.nan)
 
             # Compute repulsion energy and forces for projectile-target interactions
             energies_repulsion, forces_repulsion, projectile_forces = (
@@ -275,7 +284,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             full_forces = jnp.concatenate(
                 [projectile_forces[:, None, :], total_forces], axis=1
             )  # (batch_size,N+1,3)
-            return total_energies, full_forces, etot_ensemble_var, charges
+            return total_energies, full_forces, etot_ensemble_var, full_charges
 
         # Build full species array: [projectile, ...target_atoms]
         full_species = np.concatenate(
@@ -305,18 +314,25 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             else:
                 etot_ensemble_var = jnp.full_like(energies_model, jnp.nan)
             
+            #print(f"DEBUG: model provided energies with shape {energies_model.shape}, energies sample: {energies_model}")
+            #print(f"DEBUG: model provided forces with shape {forces_model.shape}, forces sample: {forces_model}")
             #Extract per-frame ensemble charges if model provides it (units: e). 
             # Always return a JAX array sentinel when missing so JIT tracing remains stable.
             if isinstance(aux, dict) and "charges" in aux:
-                charges = aux["charges"]
+                #print(f"DEBUG: model provided charges with shape {aux['charges'].shape}, charges sample: {aux['charges']}")# (batch_size * N,)
+                full_charges = aux["charges"].reshape(
+                    full_coordinates.shape[0],
+                    full_coordinates.shape[1]
+                    ) # (batch_size, N)
+                #print(f"DEBUG:  charges have shape {full_charges.shape}, charges sample: {full_charges}")
             else:
-                charges = jnp.full((full_coordinates.shape[0], full_coordinates.shape[1]), jnp.nan)  # (batch_size, N)
+                full_charges = jnp.full((full_coordinates.shape[0], full_coordinates.shape[1]), jnp.nan)  # (batch_size, N)
             
             # Total energy and forces (no repulsion in non-collision mode)
             total_energies = energies_model * energy_conv
             total_forces = forces_model.reshape(coordinates_model.shape[0], -1, 3) * energy_conv
             full_forces = total_forces  # (batch_size,N,3)
-            return total_energies, full_forces, etot_ensemble_var, charges
+            return total_energies, full_forces, etot_ensemble_var, full_charges
 
         full_species = species.copy()  # (N,)
         full_coordinates = coordinates.copy()  # (batch_size,N,3)
@@ -356,10 +372,11 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         # Velocity Verlet integration - part 2: compute new accelerations and update velocities
         # a(t+dt) computed from forces at new coordinates
         # v(t+dt) = v(t+dt/2) + a(t+dt) * dt/2
+        # Returns updated velocities, accelerations, and energies, and variance, and charges
         energies, forces, _var, _chrg = total_energies_and_forces(coordinates, conformation)
         accelerations = forces / masses  # (batch_size,N+1,3) in collision mode; (batch_size,N,3) otherwise
         velocities = velocities + accelerations * dt2  # (batch_size,N+1,3) in collision mode; (batch_size,N,3) otherwise
-        return velocities, accelerations, energies  # energies is (batch_size,)
+        return velocities, accelerations, energies, _var, _chrg  # energies is (batch_size,)
 
     def integrate(initial_coordinates, initial_velocities, accelerations, step=0, energy_output_file=None, energy_steps=100):
         # Main dynamics integration step using Velocity Verlet algorithm
@@ -384,7 +401,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             initial_conformation, coords_for_model))
 
         # Part 2: Compute new accelerations at updated positions and complete velocity update
-        velocities, accelerations, energies = integrate_part2(
+        velocities, accelerations, energies, aux_var, aux_chrg = integrate_part2(
             coordinates, velocities, conformation
         )
 
@@ -392,7 +409,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
         # Extract per-frame ensemble variance, and charges from model (when track_variance enabled)
         # Done outside JIT to allow per-step access even if energy file written less frequently
         frame_variance = None
-        _, _, aux_var, aux_chrg = total_energies_and_forces(coordinates, conformation)
+        #_, _, aux_var, aux_chrg = total_energies_and_forces(coordinates, conformation)
         if track_variance:
             try:
                 if aux_var is not None:
