@@ -65,14 +65,24 @@ def get_composition_string(species):
 
 
 def write_xyz_frame(f, symbols, coordinates, charges=None, **kwargs):
+    """Write a single XYZ frame.
+    Supports an optional `comment` kwarg (2nd XYZ line) and optional per-atom charges.
+    """
     nat = len(symbols)
+    comment = kwargs.get("comment", "")
     f.write(f"{nat}\n")
-    f.write("\n")
+    f.write(f"{comment}\n")
+
+    if charges is not None:
+        charges = np.asarray(charges).reshape(-1)
+        if charges.shape[0] != nat:
+            raise ValueError(f"charges must have length {nat}, got shape {charges.shape}")
+    
     for i in range(nat):
         if charges is not None:
             #print(f"DEBUG: charges: {charges}")
             f.write(
-                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}   {charges[i]}\n"
+                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}    {float(charges[i]): .8f}\n"
             )
         else:
             f.write(
