@@ -512,9 +512,13 @@ def main() -> None:
             print(f"# Saved initial state to {single_init_file}")
         else:
             batch_init_file = _npz_path(batch_init_base)
-            # Protect a previous run's batchdyn.init from being overwritten:
-            # demote it to an indexed name (or claim the next free index).
-            batch_init_file = _next_indexed_path(batch_init_file)
+            # Keep the canonical unindexed name for the latest init-state file.
+            # If it already exists, archive it to the next free indexed name first.
+            if os.path.exists(batch_init_file):
+                archived = _next_indexed_path(batch_init_file)
+                # _next_indexed_path only moves the plain file in the "no indexed variants" case.
+                if os.path.exists(batch_init_file):
+                    shutil.move(batch_init_file, archived)
             np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
             print(f"# Saved batch initial state to {batch_init_file}")
     
@@ -844,10 +848,11 @@ def main() -> None:
 
     # Ensure we know the exact filename np.savez will create
     restart_save_file = restart_file if restart_file.endswith(".npz") else restart_file + ".npz"
-    if batch_size > 1:
-        # Protect a previous run's restart file from being overwritten: demote it
-        # to an indexed name (or claim the next free index) before writing anew.
-        restart_save_file = _next_indexed_path(restart_save_file)
+    if batch_size > 1 and os.path.exists(restart_save_file):
+        archived = _next_indexed_path(restart_save_file)
+        # _next_indexed_path only moves the plain file in the "no indexed variants" case.
+        if os.path.exists(restart_save_file):
+            shutil.move(restart_save_file, archived)
     np.savez(restart_save_file,
         coordinates=save_coords,
         velocities=save_vels,
