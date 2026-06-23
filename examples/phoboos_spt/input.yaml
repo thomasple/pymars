@@ -1,0 +1,9 @@
+# PhoBOOS Singlepoint Energy Configuration Input File
+
+calculation_parameters:
+  device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
+  model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
+
+input_parameters:
+  initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
+  total_charge: 0                        # Total molecular charge

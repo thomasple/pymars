@@ -8,9 +8,6 @@ __all__ = ['us','format_batch_conformations','update_conformation','get_composit
 
 us = UnitSystem(L="angstrom",T="ps",E="kcalpermol")
 
-
-
-
 def format_batch_conformations(species,coordinates,total_charge=0):
     """Format batch conformations into a dictionary for FeNNol model processing.
 

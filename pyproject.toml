@@ -1,6 +1,6 @@
 [project]
 name = "pymars"
-version = "1.4.0"
+version = "1.5.0"
 description = "Dynamics simulations for reactive trajectories"
 readme = "README.md"
 authors = [
@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 pymars = "pymars:main"
+phoboos = "pymars.phoboos:main"
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.9.0"]
