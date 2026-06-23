@@ -2,18 +2,165 @@ import argparse
 import yaml
 import numpy as np
 import os
+import sys
 import time
 import re
 import shutil
 import platform
+from importlib.metadata import version, PackageNotFoundError
+try:
+    __version__ = version("pymars")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 __all__ = []
 
+
+class _Tee:
+    """File-like object that writes to multiple streams at once.
+
+    Used to mirror stdout to both the terminal and an on-disk log file
+    (e.g. <prefix>.out), without requiring the user to redirect manually.
+    """
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+            s.flush()
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def _next_indexed_path(path):
+    """Return the path a NEW run should write to for a file that must not be
+    overwritten by successive batch runs in the same directory.
+
+    Rule:
+      - If neither the plain (unindexed) file nor any '<root>_N<ext>' indexed
+        variant exists yet: return the plain path unchanged (first run).
+      - If the plain file exists but no indexed variant exists yet: rename
+        the plain file to '<root>_0<ext>' (demoting it to history), then
+        return '<root>_1<ext>' for the new run to write to.
+      - If one or more indexed variants already exist: leave all existing
+        files (plain or indexed) untouched, and return '<root>_{max+1}<ext>'
+        for the new run to write to.
+
+    The plain/unindexed name is therefore only ever used for the very first
+    run; once any collision has occurred, it is never reused, and indexed
+    files are frozen history (never auto-loaded or overwritten).
+    """
+    root, ext = os.path.splitext(path)
+    directory = os.path.dirname(root) or "."
+    base_root = os.path.basename(root)
+
+    pattern = re.compile(rf"^{re.escape(base_root)}_(\d+){re.escape(ext)}$")
+    existing_indices = []
+    if os.path.isdir(directory):
+        for name in os.listdir(directory):
+            m = pattern.match(name)
+            if m:
+                existing_indices.append(int(m.group(1)))
+
+    plain_exists = os.path.isfile(path)
+
+    if not plain_exists and not existing_indices:
+        # First run: nothing to protect.
+        return path
+
+    if plain_exists and not existing_indices:
+        # Demote the existing plain file to index 0, new run takes index 1.
+        demoted_path = os.path.join(directory, f"{base_root}_0{ext}")
+        shutil.move(path, demoted_path)
+        return os.path.join(directory, f"{base_root}_1{ext}")
+
+    # Indexed variants already exist: new run claims the next free index.
+    next_index = max(existing_indices) + 1
+    return os.path.join(directory, f"{base_root}_{next_index}{ext}")
+
+
+def print_version_info() -> None:
+    import sys
+    import platform
+    from importlib.metadata import version as pkg_version, PackageNotFoundError
+
+    # --- pymars ---
+    try:
+        pymars_ver = pkg_version("pymars")
+    except PackageNotFoundError:
+        pymars_ver = "unknown"
+    install_path = os.path.dirname(os.path.abspath(__file__))
+
+    # --- Python ---
+    python_ver = sys.version.replace("\n", " ")
+
+    # --- numpy ---
+    try:
+        import numpy as np
+        numpy_ver = np.__version__
+    except ImportError:
+        numpy_ver = "not installed"
+
+    # --- scipy ---
+    try:
+        import scipy
+        scipy_ver = scipy.__version__
+    except ImportError:
+        scipy_ver = "not installed"
+
+    # --- jax ---
+    try:
+        import jax
+        jax_ver = jax.__version__
+    except ImportError:
+        jax_ver = "not installed"
+
+    # --- Hardware: OS/platform ---
+    os_info = platform.platform()
+    cpu_info = platform.processor() or platform.machine()
+    cpu_count_physical = os.cpu_count()  # logical cores
+
+    # --- Hardware: RAM ---
+    try:
+        import psutil
+        ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+        ram_str = f"{ram_gb:.1f} GB"
+    except ImportError:
+        ram_str = "unknown (install psutil)"
+
+    # --- Hardware: GPU via JAX ---
+    gpu_str = "none detected"
+    try:
+        import jax
+        gpu_devices = [d for d in jax.devices() if d.platform != "cpu"]
+        if gpu_devices:
+            gpu_str = ", ".join(str(d) for d in gpu_devices)
+        else:
+            gpu_str = "none (JAX sees CPU only)"
+    except Exception:
+        gpu_str = "unknown (JAX unavailable)"
+
+    print(f"pymars version   : {pymars_ver}")
+    print(f"installation path: {install_path}")
+    print(f"")
+    print(f"Python           : {python_ver}")
+    print(f"numpy            : {numpy_ver}")
+    print(f"scipy            : {scipy_ver}")
+    print(f"jax              : {jax_ver}")
+    print(f"")
+    print(f"OS/platform      : {os_info}")
+    print(f"CPU              : {cpu_info} ({cpu_count_physical} logical cores)")
+    print(f"RAM              : {ram_str}")
+    print(f"GPU              : {gpu_str}")
+
 def main() -> None:
-    # Print installed package path (directory containing this __init__.py module).
-    print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
-    # Print execution folder (working directory where the command is run, which may differ from installation path).
-    print(f"# Running from folder: {os.getcwd()}")
+    # Handle --version early, before argparse demands input_file
+    if "--version" in sys.argv:
+        print_version_info()
+        sys.exit(0)
 
     parser = argparse.ArgumentParser(
         description="pymars: A molecular collision simulation package"
@@ -25,7 +172,40 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
-    
+
+    # --- Set up internal logging to <prefix>.out as early as possible, so that
+    # essentially all terminal output (starting with the very first print below)
+    # is also captured to disk, without requiring the user to redirect manually.
+    # <prefix> is derived from input_parameters.initial_geometry (e.g. "aspirin.xyz"
+    # -> "aspirin.out"), falling back to "traj.out" if no geometry is configured.
+    # For batch_size > 1, successive runs in the same directory get this log file
+    # protected from being overwritten via the same indexing scheme used for the
+    # restart and dyn.init files below (first run: plain name; subsequent runs:
+    # the old file is demoted to _0 and new runs claim the next free _N).
+    input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
+    _early_calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)
+    _early_input_params = simulation_parameters.get("input_parameters", {})
+    _early_general_params = simulation_parameters.get("general_parameters", simulation_parameters)
+    _early_initial_xyz = _early_input_params.get("initial_geometry", None)
+    if _early_initial_xyz:
+        _log_prefix = os.path.splitext(os.path.basename(_early_initial_xyz))[0]
+    else:
+        _log_prefix = "traj"
+    _early_batch_size = int(_early_general_params.get("batch_size", 1))
+
+    log_file_path = os.path.join(input_yaml_dir, f"{_log_prefix}.out")
+    if _early_batch_size > 1:
+        log_file_path = _next_indexed_path(log_file_path)
+    _log_fh = open(log_file_path, "a")
+    sys.stdout = _Tee(sys.__stdout__, _log_fh)
+    sys.stderr = _Tee(sys.__stderr__, _log_fh)
+    print(f"# Logging terminal output to: {log_file_path}")
+
+    # Print installed package path (directory containing this __init__.py module).
+    print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
+    # Print execution folder (working directory where the command is run, which may differ from installation path).
+    print(f"# Running from folder: {os.getcwd()}")
+
     # Set FENNOL_MODULES_PATH BEFORE any fennol imports
     # This must be done before importing utils (which imports fennol) and md (which imports fennol)
     calc_params = simulation_parameters.get("calculation_parameters", simulation_parameters)
@@ -48,11 +228,10 @@ def main() -> None:
     restart_traj = bool(calc_params.get("restart_traj", False))
 
     # Determine restart file path: place the restart file next to the input YAML
-    input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
     restart_file = os.path.join(input_yaml_dir, restart_file_name)
     # Also show the name of the restart file
     # (useful when working directories or folder names change)
-    print(f"# Restart file will be: {restart_file_name}")
+    print(f"# Restart file will be: {restart_file_name}.npz")
 
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
@@ -108,7 +287,6 @@ def main() -> None:
         print("# Detailed error information:")
         import traceback
         traceback.print_exc()
-        import sys
         sys.exit(1)
 
     jax.config.update("jax_default_device", _device)
@@ -207,7 +385,7 @@ def main() -> None:
 
     print(f"# NumPy version: {np.__version__}")
     print(f"# SciPy version: {scipy_version}")
-    print(f"# PyMARS version: 1.3.1")  # Update this manually when bumping version in pyproject.toml 
+    print(f"# PyMARS version: {__version__}")  
     print(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
@@ -239,6 +417,7 @@ def main() -> None:
     coordinates = system["coordinates"]
     velocities = system["velocities"]
     accelerations = system["accelerations"]
+    charges = system.get("charges", None)
     species = system["species"]
     masses = system["masses"]
     batch_size = system["batch_size"]
@@ -298,7 +477,7 @@ def main() -> None:
     batch_init_base = os.path.join(os.getcwd(), f"{init_prefix}.batchdyn.init")
 
     # Allow gating initial-state saving via input flag (default True for backward compatibility).
-    save_initial = bool(input_params.get("save_initial", True))
+    save_initial = bool(calc_params.get("save_initial", True))
 
     if not restart_traj:
         if batch_size == 1:
@@ -333,6 +512,13 @@ def main() -> None:
             print(f"# Saved initial state to {single_init_file}")
         else:
             batch_init_file = _npz_path(batch_init_base)
+            # Keep the canonical unindexed name for the latest init-state file.
+            # If it already exists, archive it to the next free indexed name first.
+            if os.path.exists(batch_init_file):
+                archived = _next_indexed_path(batch_init_file)
+                # _next_indexed_path only moves the plain file in the "no indexed variants" case.
+                if os.path.exists(batch_init_file):
+                    shutil.move(batch_init_file, archived)
             np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
             print(f"# Saved batch initial state to {batch_init_file}")
     
@@ -369,7 +555,7 @@ def main() -> None:
     write_traj = traj_file.lower() != "none"
     if write_traj:
         assert traj_file.endswith(".xyz"), "Only .xyz output format is supported currently."
-        from fennol.utils.io import write_xyz_frame
+        from .utils import write_xyz_frame
         if batch_size ==1:
             traj_paths = [traj_file]
             ftraj = [open(traj_paths[0], "w")]
@@ -506,13 +692,13 @@ def main() -> None:
         print(header)
 
     for istep in range(start_step, n_steps):
-        coordinates, velocities, accelerations, energies, energy_data, frame_variance = integrate(
+        coordinates, velocities, accelerations, energies, energy_data, charges, frame_variance = integrate(
             coordinates, velocities, accelerations,
             step=istep,
             energy_output_file=energy_files if energy_file else None,
             energy_steps=save_energy
         )
-
+        #print(f"DEBUG: charges={charges}, charges.shape={charges.shape if charges is not None else None}, coordinates.shape={coordinates.shape}, accelerations.shape={accelerations.shape}")
         # Collect energy data for summary statistics
         if energy_data is not None:
             energy_history.append(energy_data)
@@ -555,6 +741,7 @@ def main() -> None:
                         ftraj[i],
                         element_symbols,
                         coords[i],
+                        charges[i] if 'charges' in system else None,
                         comment=f"Step {istep+1} E_pot={potential_energy:.6f}",
                     )
         
@@ -661,6 +848,11 @@ def main() -> None:
 
     # Ensure we know the exact filename np.savez will create
     restart_save_file = restart_file if restart_file.endswith(".npz") else restart_file + ".npz"
+    if batch_size > 1 and os.path.exists(restart_save_file):
+        archived = _next_indexed_path(restart_save_file)
+        # _next_indexed_path only moves the plain file in the "no indexed variants" case.
+        if os.path.exists(restart_save_file):
+            shutil.move(restart_save_file, archived)
     np.savez(restart_save_file,
         coordinates=save_coords,
         velocities=save_vels,
@@ -868,10 +1060,5 @@ def main() -> None:
         )
         #print("# [BATCH_DEBUG] batch artifact export phase completed")
 
-
 if __name__ == "__main__":
     main()
-
-
-
-
