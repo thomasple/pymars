@@ -1,7 +1,7 @@
 [project]
 name = "pymars"
-version = "1.5.0"
-description = "Dynamics simulations for reactive trajectories"
+version = "1.6.0"
+description = "Dynamics simulations for reactive trajectories, and geometry calculations, with FENNIX MLIPs"
 readme = "README.md"
 authors = [
     { name = "Thomas Plé", email = "thomas.ple@sorbonne-universite.fr" },
