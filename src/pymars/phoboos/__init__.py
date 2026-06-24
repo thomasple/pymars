@@ -150,8 +150,13 @@ def main():
     print("##################################################")
     print("#                   INPUT SECTION                 ")
     print("##################################################")
-    print(f"# Model used: {os.path.basename(model_file)}")
-    print(f"# Initial geometry: {initial_xyz} and charge: {total_charge}")
+    print(f"#  Model used: {os.path.basename(model_file)}")
+    if args.command == "spt":
+        print("#  Single-point energy calculation")
+    elif args.command == "opt":
+        print("#  Geometry optimization")
+    print(f"#  Initial geometry: {initial_xyz}")
+    print(f"#  Number of atoms: {len(open(initial_xyz).readlines())-2}    Charge: {total_charge}")
     with open(initial_xyz, "r") as f:
         lines = f.readlines()
     # Skip atom count (line 0) and comment (line 1)
@@ -169,30 +174,34 @@ def main():
         from .singlepoint import run_spt
         print("Performing single-point energy calculation...")
         run_spt(initial_xyz, model_file=model_file, total_charge=total_charge)
+        print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
     
     #for the optimization command, we need to handle additional parameters specific to optimization
-    double_precision = simul_parameters.get("calculation_parameters", {}).get("double_precision", True)
-    tolerance = simul_parameters.get("optimization_parameters", {}).get("tolerance", 1e-6)
-    dx_max = simul_parameters.get("optimization_parameters", {}).get("dx_max", 0.2)
-    dt_dyn = simul_parameters.get("optimization_parameters", {}).get("dt_dyn", 2.0)
-    max_steps = simul_parameters.get("optimization_parameters", {}).get("max_steps", 10000)
-    save_steps = simul_parameters.get("optimization_parameters", {}).get("save_steps", -1)
+    #double_precision = simulation_parameters.get("calculation_parameters", {}).get("double_precision", True)
+    tolerance = float(simulation_parameters.get("optimization_parameters", {}).get("tolerance", 1e-2))
+    dx_max = simulation_parameters.get("optimization_parameters", {}).get("dx_max", 0.2)
+    dt_dyn = simulation_parameters.get("optimization_parameters", {}).get("dt_dyn", 2.0)
+    dt_ps = dt_dyn * 1e-3  # convert fs to ps
+    max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 10000)
+    save_steps = simulation_parameters.get("optimization_parameters", {}).get("save_steps", -1)
 
     if args.command == "opt":
         from .optiminimize import run_opt
         print("Performing geometry optimization...")
-        run_opt(
-            args.input_file,
+        run_opt(xyz_file=initial_xyz,
             model_file=model_file,
-            double_precision=double_precision,
+            dt=dt_ps,
+            total_charge=total_charge,
             tolerance=tolerance,
-            dx_max=dx_max,
-            dt=dt_dyn,
             max_steps=max_steps,
-            save_steps=save_steps
-        )
+            keep_every=save_steps,
+            dxmax=dx_max,
+            )
+
+        print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
     else:
         print(f"Unknown command: {args.command}")
+        print("PhoBOOS terminated abnormally")
         sys.exit(1)

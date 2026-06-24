@@ -1,62 +1,84 @@
+#!/usr/bin/env python3
 import numpy as np
-import os
 import jax.numpy as jnp
 from pathlib import Path
 
 from fennol.models import FENNIX
+from fennol.utils.io import last_xyz_frame
 from fennol.utils.periodic_table import PERIODIC_TABLE_REV_IDX
-from pymars.utils import format_batch_conformations, us
+from fennol.utils.atomic_units import au
+from fennol.md.utils import optimize_fire2
 
-def read_xyz_file(xyz_path: str) -> tuple[list[str], np.ndarray]:
-    """Read a single-frame XYZ file."""
-    if not os.path.exists(xyz_path):
-        raise FileNotFoundError(f"XYZ file not found: {xyz_path}")
+from pymars.utils import write_xyz_frame, format_batch_conformations, us
 
-    species = []
-    coords = []
+def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
+            total_charge=0, tolerance=1e-2, max_steps=10000, keep_every=-1, dxmax=0.2):
+    "Minimize the energy of a molecular geometry using a FENNIX model"
 
-    with open(xyz_path, "r") as f:
-        lines = f.readlines()
-
-    if len(lines) < 2:
-        raise ValueError(f"XYZ file {xyz_path} has fewer than 2 lines")
-
-    try:
-        n_atoms = int(lines[0].strip())
-        #print(f"Number of atoms: {n_atoms}")
-    except ValueError:
-        raise ValueError(f"First line must be an integer (number of atoms)")
-
-    if len(lines) < 2 + n_atoms:
-        raise ValueError(f"XYZ file claims {n_atoms} atoms but has only {len(lines) - 2} data lines")
-
-    for i in range(2, 2 + n_atoms):
-        parts = lines[i].split()
-        if len(parts) < 4:
-            raise ValueError(f"Line {i+1} has fewer than 4 fields")
-        sym = parts[0]
-        try:
-            x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
-        except ValueError:
-            raise ValueError(f"Line {i+1} has non-numeric coordinates")
-        species.append(sym)
-        coords.append([x, y, z])
-
-    return species, np.array(coords, dtype=np.float64)
-
-def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
-    "Calculate the energy of a molecular geometry using a FENNIX model"
     # read the coordinates from the xyz file
     print(f"Reading coordinates from: {xyz_file}")
-    symbols, coordinates, = read_xyz_file(xyz_file)
+    symbols, coordinates, comment = last_xyz_frame(
+        xyz_file)
     print(f"Read {len(symbols)} atoms.")
     coordinates = np.array(coordinates)
     species = np.array([PERIODIC_TABLE_REV_IDX[s] for s in symbols], dtype=np.int32)
+    nat = len(species)
+    if total_charge != 0:
+        print(f"Using total charge of {total_charge} for the system.")
+    inputs = {
+        "species": species,
+        "natoms": np.array([nat], dtype=np.int32),
+        "batch_index": np.array([0] * nat, dtype=np.int32),
+        "total_charge": np.array([total_charge], dtype=np.int32),
+    }
 
     # Load the FENNIX model
     model_file = Path(model_file)
     assert model_file.exists(), f"Model file {model_file} does not exist"
     model = FENNIX.load(model_file, use_atom_padding=False)
+    convert = au.KCALPERMOL / model.Ha_to_model_energy 
+
+    def energy_force_fn(coordinates):
+        e, f, _ = model.energy_and_forces(
+            **inputs, coordinates=coordinates, gpu_preprocessing=True
+        )
+        e = float(e[0]) * convert / nat
+        f = np.array(f) * convert
+        return e, f
+
+    # Optimize the geometry using FIRE algorithm
+    print("Starting geometry optimization...")
+    results = optimize_fire2(
+        coordinates,
+        energy_force_fn,
+        atol=tolerance,
+        dt=dt,
+        Nmax=max_steps,
+        logoutput=True,
+        keep_every=keep_every,
+        max_disp=dxmax,  # convert Angstroms to Bohr
+    )
+    coordinates = results[0]
+    success = results[1]
+    print("#######################################################")
+    if success:
+        print("Optimization converged successfully!")
+    else:
+        print("Optimization did not converge... Writing the last frame anyway.")
+
+
+    #If selected, write the trajectory of the optimization to a file
+    if keep_every > 0:
+        traj_file = xyz_file.with_suffix(".trj.xyz")
+        with open(traj_file, "w") as f:
+            for step, coords in enumerate(results[2]):
+                if step % keep_every == 0:
+                    write_xyz_frame(f, symbols, coords, comment=f"Step {step}")
+        print(f"Optimization trajectory written to {traj_file}")
+
+    print("#######################################################")
+    print(f"Preparing final single-point energy calculation for the optimized geometry...")
+
     model.preproc_state = model.preproc_state.copy({"check_input": False})
     # Energy unit conversion: model outputs in its native units, convert to kcal/mol
     energy_conv = 1.0 / us.get_multiplier(model.energy_unit)
@@ -68,8 +90,7 @@ def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
     use_gpu=True,
     **pre_conformation
     )
-    #print(conformation.keys())
-    
+
     def total_energies_and_forces(full_coordinates, conformation):
         coordinates_model = full_coordinates[None, :, :]
 
@@ -114,7 +135,22 @@ def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
             print(f"{i+1}\t{s}\t{q:.4f}")
     else:
         print("No partial charges were computed by the model.")
-    
+
+    # write the output
+    xyz_file = Path(xyz_file)
+    output_file = outfile if outfile else xyz_file.with_suffix(".opt.xyz")
+    with open(output_file, "w") as f:
+        write_xyz_frame(f, symbols, coordinates, partial_charges, comment="Geometry optimized with FENNIX model: {os.path.basename(model_file)}")
+    print("\n")
+    print(f"Final configuration written to {output_file}:")
+    print(f"Number of atoms: {len(symbols)}")
+    with open(output_file, "r") as f:
+        lines = f.readlines()
+    # Skip atom count (line 0) and comment (line 1)
+    for line in lines[2:]:
+        print(line.rstrip())
     print("#######################################################")
-    print(f"#  Single-point calculation completed successfully!   #")
+    print(f"Optimization complete. Optimized geometry written to {outfile}.")
+    print("  Geometry optimization completed successfully!")
     print("#######################################################")
+
