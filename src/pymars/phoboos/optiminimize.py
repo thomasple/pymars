@@ -132,7 +132,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
         print("Mulliken partial charges:")
         print(f"Index\tAtom\tCharge")
         for i, (s, q) in enumerate(zip(symbols, partial_charges[0])):
-            print(f"{i+1}\t{s}\t{q:.4f}")
+            print(f"{i+1}\t{s}\t{q:.6f}")
     else:
         print("No partial charges were computed by the model.")
 
@@ -150,7 +150,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
     for line in lines[2:]:
         print(line.rstrip())
     print("#######################################################")
-    print(f"Optimization complete. Optimized geometry written to {outfile}.")
+    print(f"Optimization complete. Optimized geometry written to {output_file}.")
     print("  Geometry optimization completed successfully!")
     print("#######################################################")
 
