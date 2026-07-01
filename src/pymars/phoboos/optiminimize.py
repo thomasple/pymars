@@ -62,10 +62,6 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
     )
     coordinates = results[0]
     success = results[1]
-    print(type(results))
-    print(results)
-    print(type(results[0]))
-    print(type(results[1]))
     print("#######################################################")
     if success:
         print("Optimization converged successfully!")
