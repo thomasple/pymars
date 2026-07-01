@@ -32,6 +32,8 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
         "total_charge": np.array([total_charge], dtype=np.int32),
     }
 
+    xyz_filepath = Path(xyz_file)
+
     # Load the FENNIX model
     model_file = Path(model_file)
     assert model_file.exists(), f"Model file {model_file} does not exist"
@@ -60,6 +62,10 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
     )
     coordinates = results[0]
     success = results[1]
+    print(type(results))
+    print(results)
+    print(type(results[0]))
+    print(type(results[1]))
     print("#######################################################")
     if success:
         print("Optimization converged successfully!")
@@ -69,7 +75,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
 
     #If selected, write the trajectory of the optimization to a file
     if keep_every > 0:
-        traj_file = xyz_file.with_suffix(".trj.xyz")
+        traj_file = xyz_filepath.with_suffix(".trj.xyz")
         with open(traj_file, "w") as f:
             for step, coords in enumerate(results[2]):
                 if step % keep_every == 0:
@@ -137,8 +143,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
         print("No partial charges were computed by the model.")
 
     # write the output
-    xyz_file = Path(xyz_file)
-    output_file = outfile if outfile else xyz_file.with_suffix(".opt.xyz")
+    output_file = outfile if outfile else xyz_filepath.with_suffix(".opt.xyz")
     with open(output_file, "w") as f:
         write_xyz_frame(f, symbols, coordinates, partial_charges, comment="Geometry optimized with FENNIX model: {os.path.basename(model_file)}")
     print("\n")
