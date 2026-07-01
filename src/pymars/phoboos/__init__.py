@@ -65,6 +65,8 @@ def main():
         if model_path.exists():
             model_dir = str(model_path.parent)
             os.environ['FENNOL_MODULES_PATH'] = model_dir
+    if not model_file:
+        raise ValueError("Missing 'model' in calculation_parameters of the input YAML file.")
 
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
@@ -143,10 +145,17 @@ def main():
     from fennol.utils.input_parser import convert_dict_units
     from pymars.utils import us
 
-    #first take common inputs from both singlepoint and optimization:
+    # first take common inputs from both singlepoint and optimization:
     input_params = simulation_parameters.get("input_parameters", {})
     initial_xyz = input_params.get("initial_geometry", None)
+    if not initial_xyz:
+        raise ValueError("Missing 'initial_geometry' in input_parameters of the input YAML file.")
     total_charge = input_params.get("total_charge", 0)
+    with open(initial_xyz, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    natoms = int(lines[0].strip())
+    #Input section printout
+    print("\n")
     print("##################################################")
     print("#                   INPUT SECTION                 ")
     print("##################################################")
@@ -156,9 +165,7 @@ def main():
     elif args.command == "opt":
         print("#  Geometry optimization")
     print(f"#  Initial geometry: {initial_xyz}")
-    print(f"#  Number of atoms: {len(open(initial_xyz).readlines())-2}    Charge: {total_charge}")
-    with open(initial_xyz, "r") as f:
-        lines = f.readlines()
+    print(f"#  Number of atoms: {natoms}    Charge: {total_charge}")
     # Skip atom count (line 0) and comment (line 1)
     for line in lines[2:]:
         print(line.rstrip())
@@ -177,16 +184,15 @@ def main():
         print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
     
-    #for the optimization command, we need to handle additional parameters specific to optimization
-    #double_precision = simulation_parameters.get("calculation_parameters", {}).get("double_precision", True)
-    tolerance = float(simulation_parameters.get("optimization_parameters", {}).get("tolerance", 1e-2))
-    dx_max = simulation_parameters.get("optimization_parameters", {}).get("dx_max", 0.2)
-    dt_dyn = simulation_parameters.get("optimization_parameters", {}).get("dt_dyn", 2.0)
-    dt_ps = dt_dyn * 1e-3  # convert fs to ps
-    max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 10000)
-    save_steps = simulation_parameters.get("optimization_parameters", {}).get("save_steps", -1)
-
-    if args.command == "opt":
+    elif args.command == "opt":
+        #for the optimization command, we need to handle additional parameters specific to optimization
+        #double_precision = simulation_parameters.get("calculation_parameters", {}).get("double_precision", True)
+        tolerance = float(simulation_parameters.get("optimization_parameters", {}).get("tolerance", 1e-2))
+        dx_max = simulation_parameters.get("optimization_parameters", {}).get("dx_max", 0.2)
+        dt_dyn = simulation_parameters.get("optimization_parameters", {}).get("dt_dyn", 2.0)
+        dt_ps = dt_dyn * 1e-3  # convert fs to ps
+        max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 10000)
+        save_steps = simulation_parameters.get("optimization_parameters", {}).get("save_steps", -1)
         from .optiminimize import run_opt
         print("Performing geometry optimization...")
         run_opt(xyz_file=initial_xyz,

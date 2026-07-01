@@ -79,7 +79,7 @@ def write_xyz_frame(f, symbols, coordinates, charges=None, **kwargs):
         if charges is not None:
             #print(f"DEBUG: charges: {charges}")
             f.write(
-                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}    {float(charges[i]): .8f}\n"
+                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}    {float(charges[i]): .6f}\n"
             )
         else:
             f.write(

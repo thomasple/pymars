@@ -111,7 +111,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
                 ) # (batch_size, N)
             #print(f"DEBUG:  charges have shape {full_charges.shape}, charges sample: {full_charges}")
         else:
-            full_charges = jnp.full((full_coordinates.shape[0], full_coordinates.shape[1]), jnp.nan)  # (batch_size, N)
+            full_charges = None
         
         # Total energy and forces
         total_energies = energies_model * energy_conv
@@ -141,7 +141,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
     # write the output
     output_file = outfile if outfile else xyz_filepath.with_suffix(".opt.xyz")
     with open(output_file, "w") as f:
-        write_xyz_frame(f, symbols, coordinates, partial_charges, comment="Geometry optimized with FENNIX model: {os.path.basename(model_file)}")
+        write_xyz_frame(f, symbols, coordinates, partial_charges, comment=f"Geometry optimized with FENNIX model: {model_file.name}")
     print("\n")
     print(f"Final configuration written to {output_file}:")
     print(f"Number of atoms: {len(symbols)}")

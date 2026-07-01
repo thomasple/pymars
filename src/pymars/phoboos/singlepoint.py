@@ -52,8 +52,7 @@ def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
                 ) # (batch_size, N)
             #print(f"DEBUG:  charges have shape {full_charges.shape}, charges sample: {full_charges}")
         else:
-            full_charges = jnp.full((full_coordinates.shape[0], full_coordinates.shape[1]), jnp.nan)  # (batch_size, N)
-        
+            full_charges = None
         # Total energy and forces
         total_energies = energies_model * energy_conv
         total_forces = forces_model.reshape(coordinates_model.shape[0], -1, 3) * energy_conv
@@ -75,7 +74,7 @@ def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
         print("Mulliken partial charges:")
         print(f"Index\tAtom\tCharge")
         for i, (s, q) in enumerate(zip(symbols, partial_charges[0])):
-            print(f"{i+1}\t{s}\t{q:.4f}")
+            print(f"{i+1}\t{s}\t{q:.6f}")
     else:
         print("No partial charges were computed by the model.")
     
