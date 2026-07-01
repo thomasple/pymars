@@ -8,9 +8,6 @@ __all__ = ['us','format_batch_conformations','update_conformation','get_composit
 
 us = UnitSystem(L="angstrom",T="ps",E="kcalpermol")
 
-
-
-
 def format_batch_conformations(species,coordinates,total_charge=0):
     """Format batch conformations into a dictionary for FeNNol model processing.
 
@@ -82,7 +79,7 @@ def write_xyz_frame(f, symbols, coordinates, charges=None, **kwargs):
         if charges is not None:
             #print(f"DEBUG: charges: {charges}")
             f.write(
-                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}    {float(charges[i]): .8f}\n"
+                f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}    {float(charges[i]): .6f}\n"
             )
         else:
             f.write(

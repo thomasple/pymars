@@ -1,0 +1,16 @@
+# PhoBOOS Optimization Configuration Input File
+
+calculation_parameters:
+  device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
+  model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
+
+input_parameters:
+  initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
+  total_charge: 0                        # Total molecular charge
+
+optimization_parameters:
+  tolerance: 1e-2    # Convergence tolerance for optimization (in energy units)
+  dx_max: 0.2        # Maximum allowed displacement per optimization step (in angstrom)
+  dt_dyn: 2.0        # Timestep in femtoseconds (fs)
+  max_steps: 10000   # Maximum number of optimization steps
+  save_steps: -1    # Save trajectory frames every N steps; select -1 to save only the final optimized geometry

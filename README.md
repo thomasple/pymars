@@ -85,6 +85,60 @@ pymars input.yaml
 
 This will run a collision simulation and write a trajectory file (default `trajectory.xyz`).
 
+PhoBOOS commands (`spt`, `opt`)
+--------------------------
+
+`phoboos` is the geometry-focused companion CLI (entry point: `phoboos = pymars.phoboos:main`).
+It reads an input YAML and runs either single-point energy evaluation or geometry optimization
+using a FeNNIX model.
+
+### Command: `phoboos spt`
+
+Single-point calculation:
+
+```bash
+phoboos spt examples/phoboos_spt/input.yaml
+```
+
+What it does:
+- Loads `input_parameters.initial_geometry` (XYZ)
+- Loads the FeNNIX model from `calculation_parameters.model`
+- Evaluates energy (and prints corresponding output/log info)
+- Does not run an optimization trajectory
+
+Minimum required YAML sections:
+- `calculation_parameters`:
+  - `model`
+  - optional: `device`
+- `input_parameters`:
+  - `initial_geometry`
+  - optional: `total_charge`
+
+### Command: `phoboos opt`
+
+Geometry optimization (iterative structure update):
+
+```bash
+phoboos opt examples/phoboos_opt/input.yaml
+```
+
+What it does:
+- Loads initial geometry and FeNNIX model
+- Runs optimization with parameters from `optimization_parameters`
+- Writes optimization trajectory according to `save_steps`
+- Stops at convergence (`tolerance`) or when `max_steps` is reached
+
+Optimization parameters used by `phoboos opt`:
+- `optimization_parameters.tolerance` (default: `1e-2`)
+- `optimization_parameters.dx_max` (default: `0.2`)
+- `optimization_parameters.dt_dyn` in fs (default: `2.0`, internally converted to ps)
+- `optimization_parameters.max_steps` (default: `10000`)
+- `optimization_parameters.save_steps` (default: `-1`, save final only)
+
+Notes:
+- `phoboos` writes internal log output to `<initial_geometry_basename>.out` next to the input YAML.
+- Available subcommands include `spt`, `opt`.
+
 Python API examples
 
 Read an initial configuration and inspect shapes (example taken from the tests):
