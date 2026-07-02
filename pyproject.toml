@@ -1,6 +1,6 @@
 [project]
 name = "pymars"
-version = "1.6.2"
+version = "1.6.3"
 description = "Dynamics simulations for reactive trajectories, and geometry calculations, with FENNIX MLIPs"
 readme = "README.md"
 authors = [

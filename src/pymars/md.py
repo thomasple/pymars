@@ -516,10 +516,10 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
             # Append energy data row(s)
             with open(file_path, 'a') as f:
                 # Extract scalar values for trajectory b (handle both 1D and multi-element arrays)
-                total_e = float(total_energies_np.flat[b] if total_energies_np.size > 1 else total_energies_np)
-                pot_e = float(potential_energies_np.flat[b] if potential_energies_np.size > 1 else potential_energies_np)
-                kin_e = float(kinetic_energies_np.flat[b] if kinetic_energies_np.size > 1 else kinetic_energies_np)
-                temp = float(temperatures_np.flat[b] if temperatures_np.size > 1 else temperatures_np)
+                total_e = float(total_energies_np.flat[b])
+                pot_e   = float(potential_energies_np.flat[b])
+                kin_e   = float(kinetic_energies_np.flat[b])
+                temp    = float(temperatures_np.flat[b])
 
                 # Format time with appropriate precision
                 time_str = time_format.format(time_fs)
