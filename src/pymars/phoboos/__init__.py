@@ -24,6 +24,14 @@ def main():
     spt_parser.add_argument("input_file", type=str, help="Path to the input configuration file"
     )
 
+    optts_parser = subparsers.add_parser("optts")
+    optts_parser.add_argument("input_file", type=str, help="Path to the input configuration file"
+    )
+
+    search_parser = subparsers.add_parser("tssrc")
+    search_parser.add_argument("input_file", type=str, help="Path to the input configuration file"
+    )
+
     args = parser.parse_args()
 
     with open(args.input_file, "r") as f:
@@ -169,6 +177,20 @@ def main():
     # Skip atom count (line 0) and comment (line 1)
     for line in lines[2:]:
         print(line.rstrip())
+
+    if args.command == "tssrc":
+        final_xyz = input_params.get("final_geometry", None)
+        if not final_xyz:
+            raise ValueError("Missing 'final_geometry' in input_parameters of the input YAML file.")
+        with open(final_xyz, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        natoms_final = int(lines[0].strip())
+        if natoms_final != natoms:
+            raise ValueError(f"Initial and final geometries have different number of atoms: {natoms} vs {natoms_final}")
+        print(f"#  Final geometry: {final_xyz}")
+        # Skip atom count (line 0) and comment (line 1)
+        for line in lines[2:]:
+            print(line.rstrip())
     print("##################################################")
     print("#               END OF INPUT SECTION             ")
     print("##################################################")
@@ -207,6 +229,61 @@ def main():
 
         print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
+
+    elif args.command == "optts":
+        #for the optimization command, we need to handle additional parameters specific to optimization
+        fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.2)
+        max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
+        from .sella_ts import run_tsopt
+        print("Initializing transition state optimization...")
+        run_tsopt(xyz_file=initial_xyz,
+            model_file=model_file,
+            log_file=log_file_path,
+            total_charge=total_charge,
+            fmax=fmax,
+            max_steps=max_steps,
+            )
+
+        print ("\nPhoBOOS terminated normally.")
+        sys.exit(0)
+
+    elif args.command == "tssrc":
+        #Set effort level for transition state search (low, medium, high)
+        if simulation_parameters.get("search_parameters", {}).get("effort", None) is None:
+            raise ValueError("Missing 'effort' in search_parameters of the input YAML file.")
+        effort = simulation_parameters.get("search_parameters", {}).get("effort", "medium")
+
+        #Import optimization parameters for transition state search
+        fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.2)
+        max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
+
+        #import the transition state search function and optimization function
+        from .sella_ts import run_tssrc, run_tsopt
+
+        if effort == "low":
+            # single NEB, 12 images, faster but less accurate path
+            ts_guess, _, _ , _ = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge)
+        
+        elif effort == "medium":
+            # single NEB, 20 images, good balance
+            ts_guess, _, _ , _ = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge )
+        
+        elif effort == "high":
+            # coarse NEB first, then refine around the barrier
+            _, _, coarse, peak = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge)
+            # extract a window of images around the peak for the second NEB
+            ts_guess, _ , _ , _ = run_tssrc(coarse[peak-2], coarse[peak+2], model_file, log_file_path, n_images=20, total_charge=total_charge)
+
+        run_tsopt(xyz_file=ts_guess,
+            model_file=model_file,
+            log_file=log_file_path,
+            total_charge=total_charge,
+            fmax=fmax,
+            max_steps=max_steps,
+            )
+        print ("\nPhoBOOS terminated normally.")
+        sys.exit(0)
+
     else:
         print(f"Unknown command: {args.command}")
         print("PhoBOOS terminated abnormally")
