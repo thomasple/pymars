@@ -259,11 +259,43 @@ def main() -> None:
             gpu_index = device.split(":", 1)[1]
         else:
             gpu_index = "0"
+
+        try:
+            requested_gpu_index = int(gpu_index)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid GPU index '{gpu_index}' in MARS_DEVICE={device!r}; expected a non-negative integer."
+            ) from exc
+
+        if requested_gpu_index < 0:
+            raise RuntimeError(
+                f"Invalid GPU index '{requested_gpu_index}' in MARS_DEVICE={device!r}; expected a non-negative integer."
+            )
+
+        # Probe the currently visible GPU count before remapping CUDA_VISIBLE_DEVICES.
+        # This lets us fail fast with a clear error when the requested index does not exist.
+        import subprocess
+
+        try:
+            gpu_probe = subprocess.run(
+                [sys.executable, "-c", "import jax; print(sum(d.platform != 'cpu' for d in jax.devices()))"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            available_gpu_count = int(gpu_probe.stdout.strip() or "0")
+        except Exception:
+            available_gpu_count = None
+
+        if available_gpu_count is not None and requested_gpu_index >= available_gpu_count:
+            raise RuntimeError(
+                f"Requested GPU index {requested_gpu_index} is not available; only {available_gpu_count} GPU(s) are visible."
+            )
         
         # Make ONLY this physical GPU visible to the entire process
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
-        print(f"# Set CUDA_VISIBLE_DEVICES={gpu_index}")
-        
+        #print(f"# Set CUDA_VISIBLE_DEVICES={gpu_index}")
+        print(f"# Using GPU {gpu_index}")
         simulation_parameters["torch_device"] = "cuda:0"  # Always cuda:0 within visible set
         device = "gpu"
 
@@ -303,7 +335,7 @@ def main() -> None:
     if used_dev is None:
         # fallback to JAX's detected device
         used_dev = str(_device)
-    print(f"# Using device: {used_dev}")
+    #print(f"# Using device: {used_dev}")
 
     # Now it's safe to import fennol utilities and convert units because
     # JAX has been imported and configured with the intended device.
@@ -478,8 +510,9 @@ def main() -> None:
 
     # Allow gating initial-state saving via input flag (default True for backward compatibility).
     save_initial = bool(calc_params.get("save_initial", True))
+    start_from_init = bool(calc_params.get("start_from_init", False))
 
-    if not restart_traj:
+    if start_from_init and not restart_traj:
         if batch_size == 1:
             single_init_file = _npz_path(single_init_base)
             if os.path.exists(single_init_file):
@@ -498,6 +531,8 @@ def main() -> None:
                 velocities = _normalize_init_array(arr["velocities"], batch_size, "velocities")
                 accelerations = _normalize_init_array(arr["accelerations"], batch_size, "accelerations")
                 start_step = 0
+    elif not start_from_init:
+        print("# start_from_init is false; generating initial conditions from input seeds and batch size.")
 
     # Capture the exact initial state for reproducibility files.
     init_coords = np.asarray(coordinates)

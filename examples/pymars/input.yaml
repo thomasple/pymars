@@ -5,6 +5,7 @@ calculation_parameters:
   model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
   double_precision: true              # Use double precision (float64) instead of single (float32). Default: false
   save_initial: false                 # If true, saves the initial configuration as <xyzfilename>.dyn.init.npz or batch version <xyzfilename>.batchdyn.init.npz
+  start_from_init: false              # If true, load <xyzfilename>.dyn.init.npz or batch version <xyzfilename>.batchdyn.init.npz when present
   restart_traj: false                 # If true, continue from <xyzfilename>.dyn.restart.npz if it exists; always saves last state
 
 general_parameters:
