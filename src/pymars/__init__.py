@@ -172,6 +172,12 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
+    early_output_params = simulation_parameters.get("output_details", {})
+    verbose = bool(early_output_params.get("verbose", False))
+
+    def _vprint(*args, **kwargs):
+        if verbose:
+            print(*args, **kwargs)
 
     # --- Set up internal logging to <prefix>.out as early as possible, so that
     # essentially all terminal output (starting with the very first print below)
@@ -199,12 +205,12 @@ def main() -> None:
     _log_fh = open(log_file_path, "a")
     sys.stdout = _Tee(sys.__stdout__, _log_fh)
     sys.stderr = _Tee(sys.__stderr__, _log_fh)
-    print(f"# Logging terminal output to: {log_file_path}")
+    _vprint(f"# Logging terminal output to: {log_file_path}")
 
     # Print installed package path (directory containing this __init__.py module).
-    print(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
+    _vprint(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
     # Print execution folder (working directory where the command is run, which may differ from installation path).
-    print(f"# Running from folder: {os.getcwd()}")
+    _vprint(f"# Running from folder: {os.getcwd()}")
 
     # Set FENNOL_MODULES_PATH BEFORE any fennol imports
     # This must be done before importing utils (which imports fennol) and md (which imports fennol)
@@ -231,7 +237,7 @@ def main() -> None:
     restart_file = os.path.join(input_yaml_dir, restart_file_name)
     # Also show the name of the restart file
     # (useful when working directories or folder names change)
-    print(f"# Restart file will be: {restart_file_name}.npz")
+    _vprint(f"# Restart file will be: {restart_file_name}.npz")
 
     # Note: postpone importing fennol/.utils (which may import jax) until after
     # we've set CUDA_VISIBLE_DEVICES and configured JAX so device detection
@@ -241,7 +247,7 @@ def main() -> None:
    # Set the device
     if "MARS_DEVICE" in os.environ:
         device = os.environ["MARS_DEVICE"].lower()
-        print(f"# Setting device from env MARS_DEVICE={device}")
+        _vprint(f"# Setting device from env MARS_DEVICE={device}")
     else:
         # prefer calculation_parameters.device if present
         device = calc_params.get("device", simulation_parameters.get("device", "cpu")).lower()
@@ -253,6 +259,7 @@ def main() -> None:
         # CRITICAL: Set CUDA_VISIBLE_DEVICES BEFORE importing jax
     if device == "cpu":
         os.environ["CUDA_VISIBLE_DEVICES"] = ""  # No GPUs
+        print("# Using CPU for computations")
     elif device.startswith("cuda") or device.startswith("gpu"):
         # Extract GPU index (e.g. "cuda:1" -> "1")
         if ":" in device:
@@ -295,7 +302,7 @@ def main() -> None:
         # Make ONLY this physical GPU visible to the entire process
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
         #print(f"# Set CUDA_VISIBLE_DEVICES={gpu_index}")
-        print(f"# Using GPU {gpu_index}")
+        _vprint(f"# Using GPU {gpu_index}")
         simulation_parameters["torch_device"] = "cuda:0"  # Always cuda:0 within visible set
         device = "gpu"
 
@@ -402,10 +409,10 @@ def main() -> None:
                 trajectory_seeds[i] = s
                 seen.add(s)
 
-    print("# Per-trajectory seeds:")
-    print(f"# {'trajectory':>10} {'seed':>12}")
+    _vprint("# Per-trajectory seeds:")
+    _vprint(f"# {'trajectory':>10} {'seed':>12}")
     for i, s in enumerate(trajectory_seeds):
-        print(f"# {i:>10d} {int(s):>12d}")
+        _vprint(f"# {i:>10d} {int(s):>12d}")
 
     # Reproducibility metadata: runtime versions and hardware/platform details.
     # Useful to record alongside seed list for scientific reproducibility.
@@ -415,10 +422,10 @@ def main() -> None:
     except Exception:
         scipy_version = "unavailable"
 
-    print(f"# NumPy version: {np.__version__}")
-    print(f"# SciPy version: {scipy_version}")
-    print(f"# PyMARS version: {__version__}")  
-    print(
+    _vprint(f"# NumPy version: {np.__version__}")
+    _vprint(f"# SciPy version: {scipy_version}")
+    _vprint(f"# PyMARS version: {__version__}")  
+    _vprint(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
         f"{platform.machine()} | "
@@ -436,9 +443,9 @@ def main() -> None:
     enable_x64 = calc_params.get("double_precision", False)
     jax.config.update("jax_enable_x64", enable_x64)
     if enable_x64:
-        print("# Using double precision (float64)")
+        _vprint("# Using double precision (float64)")
     else:
-        print("# Using single precision (float32)")
+        _vprint("# Using single precision (float32)")
 
     # Import md module AFTER setting FENNOL_MODULES_PATH
     from .md import initialize_collision_simulation
@@ -532,7 +539,7 @@ def main() -> None:
                 accelerations = _normalize_init_array(arr["accelerations"], batch_size, "accelerations")
                 start_step = 0
     elif not start_from_init:
-        print("# start_from_init is false; generating initial conditions from input seeds and batch size.")
+        _vprint("# start_from_init is false; generating initial conditions from input seeds and batch size.")
 
     # Capture the exact initial state for reproducibility files.
     init_coords = np.asarray(coordinates)
@@ -544,7 +551,7 @@ def main() -> None:
         if batch_size == 1:
             single_init_file = _npz_path(single_init_base)
             np.savez(single_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
-            print(f"# Saved initial state to {single_init_file}")
+            _vprint(f"# Saved initial state to {single_init_file}")
         else:
             batch_init_file = _npz_path(batch_init_base)
             # Keep the canonical unindexed name for the latest init-state file.
@@ -555,7 +562,7 @@ def main() -> None:
                 if os.path.exists(batch_init_file):
                     shutil.move(batch_init_file, archived)
             np.savez(batch_init_file, coordinates=init_coords, velocities=init_vels, accelerations=init_accs)
-            print(f"# Saved batch initial state to {batch_init_file}")
+            _vprint(f"# Saved batch initial state to {batch_init_file}")
     
     # Convert atomic numbers to element symbols for trajectory output
     from ase.data import chemical_symbols
@@ -579,7 +586,7 @@ def main() -> None:
     else:
         raise ValueError("Either step_dyn or simulation_time must be specified")
     
-    print(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt_fs} fs)")
+    _vprint(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt_fs} fs)")
 
     # Get output parameters
     save_steps = general_params.get("save_steps", general_params.get("print_step", 100))
@@ -894,11 +901,11 @@ def main() -> None:
         accelerations=save_accs,
         step=n_steps
     )
-    print(f"# Saved last state to {restart_save_file}")
+    _vprint(f"# Saved last state to {restart_save_file}")
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
     nsperday = (simulation_time / total_time)*60*60*24*us.NS
-    print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
+    _vprint(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
 
     # ================================================================ #
     # Batch artifact export: move per-trajectory outputs into SIMXXXXX dirs
@@ -1045,7 +1052,7 @@ def main() -> None:
         summary_dst_name = os.path.basename(summary_cfg)
     else:
         summary_dst_name = None
-    print(
+    _vprint(
     #    f"# [BATCH_DEBUG] destination base names -> "
         f"# traj: {traj_dst_name}, energy: {energy_dst_name}, summary: {summary_dst_name}"
     )
@@ -1089,7 +1096,7 @@ def main() -> None:
 
     # Report completion of batch artifact export
     if batch_size > 1:
-        print(
+        _vprint(
             f"# Exported batch artifacts into {batch_size} simulation folder(s): "
             f"SIM{start_sim:05d}..SIM{start_sim + batch_size - 1:05d}"
         )

@@ -40,6 +40,7 @@ dynamic_parameters:
   step_dyn: 2000   # Total number of MD steps
 
 output_details:
+  verbose: false  # If true, prints extra run information
   trajectory_file: "trajectory.xyz"  # Output trajectory file
   # For batch simulations, you can provide a list:
   # trajectory_file:
