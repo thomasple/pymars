@@ -1,4 +1,4 @@
-# PhoBOOS Singlepoint Energy Configuration Input File
+# PhoBOOS Singlepoint/Frequencies Energy Configuration Input File
 
 calculation_parameters:
   device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu

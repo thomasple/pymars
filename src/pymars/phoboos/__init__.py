@@ -2,6 +2,7 @@ import argparse
 import yaml
 import os
 import sys
+
 #import numpy as np
 from pymars.__init__ import _Tee
 
@@ -32,6 +33,10 @@ def main():
     search_parser.add_argument("input_file", type=str, help="Path to the input configuration file"
     )
 
+    search_parser = subparsers.add_parser("freq")
+    search_parser.add_argument("input_file", type=str, help="Path to the input configuration file"
+    )
+
     args = parser.parse_args()
 
     with open(args.input_file, "r") as f:
@@ -45,7 +50,10 @@ def main():
     input_yaml_dir = os.path.dirname(os.path.abspath(args.input_file))
     _early_input_params = simulation_parameters.get("input_parameters", {})
     _early_initial_xyz = _early_input_params.get("initial_geometry", None)
-    if _early_initial_xyz:
+    _early_final_xyz = _early_input_params.get("final_geometry", None)
+    if _early_initial_xyz and _early_final_xyz:
+        _log_prefix = os.path.splitext(os.path.basename(_early_initial_xyz))[0] + "_to_" + os.path.splitext(os.path.basename(_early_final_xyz))[0]
+    elif _early_initial_xyz and not _early_final_xyz:
         _log_prefix = os.path.splitext(os.path.basename(_early_initial_xyz))[0]
     else:
         raise ValueError("Missing 'initial_geometry' in input_parameters of the input YAML file.")
@@ -54,10 +62,10 @@ def main():
     sys.stdout = _Tee(sys.__stdout__, _log_fh)
     sys.stderr = _Tee(sys.__stderr__, _log_fh)
     print("\n") #Header
-    print("################################################################")
-    print("#  PhoBOOS: PhtHOn BOOSter for molecular geometry calculations #")
-    print("#       A FENNIX-powered molecular geometry package            #")
-    print("################################################################")
+    print("#################################################################")
+    print("#  PhoBOOS: PhytHOn BOOSter for molecular geometry calculations #")
+    print("#       A FENNIX-powered molecular geometry package             #")
+    print("#################################################################")
     print(f"# Writing output to: {log_file_path}")
 
     # Print execution folder (working directory where the command is run, which may differ from installation path).
@@ -172,6 +180,12 @@ def main():
         print("#  Single-point energy calculation")
     elif args.command == "opt":
         print("#  Geometry optimization")
+    elif args.command == "optts":
+        print("#  Transition state optimization")
+    elif args.command == "freq":
+        print("#  Vibrational frequency calculation")
+    elif args.command == "tssrc":
+        print("#  Transition state search (NEB) and optimization")
     print(f"#  Initial geometry: {initial_xyz}")
     print(f"#  Number of atoms: {natoms}    Charge: {total_charge}")
     # Skip atom count (line 0) and comment (line 1)
@@ -205,7 +219,17 @@ def main():
         run_spt(initial_xyz, model_file=model_file, total_charge=total_charge)
         print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
-    
+
+    elif args.command == "freq":
+        from .singlepoint import run_spt
+        print("Performing single-point energy calculation...")
+        run_spt(initial_xyz, model_file=model_file, total_charge=total_charge)
+        from .frequencies import run_freq
+        print("Calculating vibrational frequencies...")
+        run_freq(xyz_file=initial_xyz, model_file=model_file, total_charge=total_charge)
+        print ("\nPhoBOOS terminated normally.")
+        sys.exit(0)
+        
     elif args.command == "opt":
         #for the optimization command, we need to handle additional parameters specific to optimization
         #double_precision = simulation_parameters.get("calculation_parameters", {}).get("double_precision", True)
@@ -236,25 +260,35 @@ def main():
         max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
         from .sella_ts import run_tsopt
         print("Initializing transition state optimization...")
-        run_tsopt(xyz_file=initial_xyz,
+        atoms, ts_file = run_tsopt(xyz_file=initial_xyz,
             model_file=model_file,
             log_file=log_file_path,
             total_charge=total_charge,
             fmax=fmax,
             max_steps=max_steps,
             )
-
+        
+        from .singlepoint import run_spt
+        print("Performing single-point energy calculation...")
+        run_spt(ts_file, model_file=model_file, total_charge=total_charge)
+        from .frequencies import run_freq
+        print("Calculating vibrational frequencies...")
+        run_freq(xyz_file=ts_file, model_file=model_file, total_charge=total_charge)
+        print(f"Transition state optimization and frequency calculation completed. Final geometry saved to {ts_file}.")
+        print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
+        
         print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
 
     elif args.command == "tssrc":
+        max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
         #Set effort level for transition state search (low, medium, high)
         if simulation_parameters.get("search_parameters", {}).get("effort", None) is None:
             raise ValueError("Missing 'effort' in search_parameters of the input YAML file.")
         effort = simulation_parameters.get("search_parameters", {}).get("effort", "medium")
 
         #Import optimization parameters for transition state search
-        fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.2)
+        fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.0003)
         max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
 
         #import the transition state search function and optimization function
@@ -262,25 +296,40 @@ def main():
 
         if effort == "low":
             # single NEB, 12 images, faster but less accurate path
-            ts_guess, _, _ , _ = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge)
+            ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge, max_steps=max_steps, mode="loose")
         
         elif effort == "medium":
             # single NEB, 20 images, good balance
-            ts_guess, _, _ , _ = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge )
+            ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_steps, mode="loose")
         
         elif effort == "high":
-            # coarse NEB first, then refine around the barrier
-            _, _, coarse, peak = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge)
-            # extract a window of images around the peak for the second NEB
-            ts_guess, _ , _ , _ = run_tssrc(coarse[peak-2], coarse[peak+2], model_file, log_file_path, n_images=20, total_charge=total_charge)
+            # first NEB, then refined around the barrier
+            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_steps, mode="tight")
+        else:
+            print(f"WARNING: Unknown effort level: {effort}. Next time, please choose from 'low', 'medium', or 'high'.") 
+            print("Proceeding with default 'medium' effort level.")  
+            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_steps, mode="loose")
 
-        run_tsopt(xyz_file=ts_guess,
+        #print(f"#DEBUG:Transition state search completed. Transition state guess saved to {ts_file}.")
+
+        atoms, ts_optfile = run_tsopt(xyz_file=ts_file,
             model_file=model_file,
             log_file=log_file_path,
             total_charge=total_charge,
             fmax=fmax,
             max_steps=max_steps,
             )
+        print(f"Transition state optimization completed. Final geometry saved to {ts_optfile}.")
+        
+        from .singlepoint import run_spt
+        print("Performing single-point energy calculation...")
+        run_spt(ts_file, model_file=model_file, total_charge=total_charge)
+        from .frequencies import run_freq
+        print("Calculating vibrational frequencies...")
+        run_freq(xyz_file=ts_file, model_file=model_file, total_charge=total_charge)
+        print(f"Transition state optimization and frequency calculation completed. Final geometry saved to {ts_file}.")
+        print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
+        
         print ("\nPhoBOOS terminated normally.")
         sys.exit(0)
 

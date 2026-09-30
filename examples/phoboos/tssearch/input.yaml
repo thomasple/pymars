@@ -7,11 +7,11 @@ calculation_parameters:
 input_parameters:
   initial_geometry: "tests/reactant.xyz"  # Path to initial XYZ geometry
   final_geometry: "tests/product.xyz"     # Path to final XYZ geometry
-  total_charge: 0                        # Total molecular charge
+  total_charge: 0                         # Total molecular charge
 
 optimization_parameters:
   f_max: 0.2         
-  max_steps: 1000   # Maxumum number of optimization steps
+  max_steps: 1000   # Maximum number of optimization steps and search steps for transition state search. Default: 1000
 
 search_parameters:
   effort: "medium"  # Options: 'low', 'medium', 'high'. Default: 'medium'
