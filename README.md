@@ -93,7 +93,7 @@ The last update changed both the examples and the PhoBOOS runtime behavior:
 - `phoboos` now prints total runtime on normal exit, instead of only a generic termination message.
 - The vibrational frequency workflow now prints the frequency sequence one mode per line after the formatted report.
 - PhoBOOS transition-state search now uses separate search-stage and refinement-stage parameters.
-- The PhoBOOS example inputs were reorganized into dedicated folders for `singlepoint-freq`, `optimization`, `tsopt`, and `tssearch`.
+- The PhoBOOS example inputs were reorganized into dedicated folders for `singlepoint-freq`, `optimization`, `optts`, and `tssearch`.
 - The main `pymars` example input now documents verbose output control, initial-state replay, and restart handling.
 
 The configuration reference below matches the example files in `examples/`.
@@ -295,7 +295,7 @@ Input parameters used by `phoboos tssrc`:
 
 Notes:
 - `phoboos` writes internal log output to `<initial_geometry_basename>.out` next to the input YAML.
-- Available subcommands include `spt`, `freq`, `opt`, and `tssrc`.
+- Available subcommands include `spt`, `freq`, `opt`, `optts`, and `tssrc`.
 
 ## On the Nudged Elastic Band Transition state search
 
