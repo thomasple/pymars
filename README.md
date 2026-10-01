@@ -85,12 +85,116 @@ pymars input.yaml
 
 This will run a collision simulation and write a trajectory file (default `trajectory.xyz`).
 
-PhoBOOS commands (`spt`, `opt`)
+Recent changes (1.7.4)
+-----------------------------------
+
+The last update changed both the examples and the PhoBOOS runtime behavior:
+
+- `phoboos` now prints total runtime on normal exit, instead of only a generic termination message.
+- The vibrational frequency workflow now prints the frequency sequence one mode per line after the formatted report.
+- PhoBOOS transition-state search now uses separate search-stage and refinement-stage parameters.
+- The PhoBOOS example inputs were reorganized into dedicated folders for `singlepoint-freq`, `optimization`, `tsopt`, and `tssearch`.
+- The main `pymars` example input now documents verbose output control, initial-state replay, and restart handling.
+
+The configuration reference below matches the example files in `examples/`.
+
+### Main `pymars` example (`examples/pymars/input.yaml`)
+
+The main collision-simulation example currently includes these sections and keys:
+
+- `calculation_parameters`
+  - `device`: Compute device, such as `cpu` or `cuda:0`.
+  - `model`: Path to the FENNIX model file.
+  - `double_precision`: Use float64 coordinates and velocities when true.
+  - `save_initial`: Save the initial state to a `.npz` file when true.
+  - `start_from_init`: Load the saved initial state when present.
+  - `restart_traj`: Resume from a restart file when present.
+
+- `general_parameters`
+  - `temperature`: Temperature in Kelvin.
+  - `batch_size`: Number of trajectories.
+  - `seed`: Random seed or per-trajectory seed list.
+  - `save_steps`: Trajectory save frequency.
+  - `save_energy`: Energy save frequency.
+  - `save_summary`: Summary save frequency.
+
+- `input_parameters`
+  - `initial_geometry`: Starting XYZ geometry.
+  - `total_charge`: Total molecular charge.
+  - `random_rotation`: Apply a random rotation to the initial configuration.
+
+- `projectile_parameters`
+  - `projectile_flag`: Enable projectile collision setup.
+  - `projectile_species`: Projectile atomic number.
+  - `projectile_temperature`: Projectile temperature in Kelvin.
+  - `projectile_distance`: Initial projectile distance in angstrom.
+  - `max_impact_parameter`: Maximum impact parameter in angstrom.
+
+- `thermostat_parameters`
+  - `NO_thermostat`: Use NVE / microcanonical dynamics.
+  - `LGV_thermostat`: Legacy Langevin toggle kept for compatibility.
+  - `gamma`: Langevin friction constant.
+
+- `dynamic_parameters`
+  - `dt_dyn`: Timestep in femtoseconds.
+  - `step_dyn`: Number of integration steps.
+
+- `output_details`
+  - `verbose`: Print extra run information.
+  - `trajectory_file`: Trajectory filename.
+  - `energies_file`: Energy output filename.
+  - `track_variance`: Add a `Var(eV^2)` column when the model exposes `etot_ensemble_var`.
+  - `summary_file`: Summary output filename.
+
+PhoBOOS commands (`spt`, `freq`, `opt`, `optts`, `tssrc`)
 --------------------------
 
 `phoboos` is the geometry-focused companion CLI (entry point: `phoboos = pymars.phoboos:main`).
 It reads an input YAML and runs either single-point energy evaluation or geometry optimization
 using a FeNNIX model.
+
+PhoBOOS input file structure
+----------------------------
+
+The CLI reads the following YAML sections. Only `calculation_parameters` and `input_parameters`
+are required for every command; the other sections are used by specific subcommands.
+
+### `calculation_parameters`
+
+Settings that control the FeNNIX model and execution environment.
+
+- `model`: Path to the FeNNIX model file (`.fnx`). Required.
+- `device`: Compute device for JAX/FeNNol. Common values are `cpu`, `cuda:0`, `gpu:0`.
+  If omitted, `cpu` is used.
+
+### `input_parameters`
+
+Geometry and system information shared by all PhoBOOS commands.
+
+- `initial_geometry`: Path to the starting XYZ geometry. Required.
+- `final_geometry`: Path to the target XYZ geometry for `tssrc`. Required only for `tssrc`.
+- `total_charge`: Total molecular charge. Default: `0`.
+
+### `optimization_parameters`
+
+Used by `opt`, `optts`, and `tssrc`.
+
+- `tolerance`: Convergence threshold for the geometry optimizer in `opt`. Default: `1e-2`.
+- `f_max`: Force threshold used by `optts`. The example input sets this to `0.2`.
+- `dx_max`: Maximum step size used by the geometry optimizer. Default: `0.2`.
+- `dt_dyn`: Timestep in femtoseconds for `opt`. It is converted internally to picoseconds. Default: `2.0`.
+- `max_steps`: Maximum number of optimizer steps. Default: `1000` for TS workflows and `10000` for `opt`.
+- `save_steps`: Save frequency for optimization trajectory output. Default: `-1` (final structure only).
+
+### `search_parameters`
+
+Used by `tssrc`.
+
+- `effort`: Transition-state search level. Supported values are `low`, `medium`, and `high`.
+- `f_max`: Force threshold for the NEB search stage. The example input sets this to `0.3`.
+- `max_steps`: Maximum number of NEB search steps. The example input sets this to `1000`.
+
+### Command behavior overview
 
 ### Command: `phoboos spt`
 
@@ -106,13 +210,30 @@ What it does:
 - Evaluates energy (and prints corresponding output/log info)
 - Does not run an optimization trajectory
 
-Minimum required YAML sections:
-- `calculation_parameters`:
-  - `model`
-  - optional: `device`
-- `input_parameters`:
-  - `initial_geometry`
-  - optional: `total_charge`
+Input parameters used by `phoboos spt`:
+- `calculation_parameters.model`: FeNNIX model path
+- `calculation_parameters.device`: Optional device selection
+- `input_parameters.initial_geometry`: Starting XYZ geometry
+- `input_parameters.total_charge`: Optional total charge
+
+### Command: `phoboos freq`
+
+Single-point energy followed by vibrational analysis:
+
+```bash
+phoboos freq examples/phoboos_spt/input.yaml
+```
+
+What it does:
+- Runs a single-point energy evaluation first
+- Re-centers the geometry, aligns the principal axes, and performs a harmonic vibrational analysis
+- Prints the vibrational report and the per-mode frequency sequence in cm^-1
+
+Input parameters used by `phoboos freq`:
+- `calculation_parameters.model`: FeNNIX model path
+- `calculation_parameters.device`: Optional device selection
+- `input_parameters.initial_geometry`: Starting XYZ geometry
+- `input_parameters.total_charge`: Optional total charge
 
 ### Command: `phoboos opt`
 
@@ -128,6 +249,17 @@ What it does:
 - Writes optimization trajectory according to `save_steps`
 - Stops at convergence (`tolerance`) or when `max_steps` is reached
 
+Input parameters used by `phoboos opt`:
+- `calculation_parameters.model`: FeNNIX model path
+- `calculation_parameters.device`: Optional device selection
+- `input_parameters.initial_geometry`: Starting XYZ geometry
+- `input_parameters.total_charge`: Optional total charge
+- `optimization_parameters.tolerance`: Convergence threshold
+- `optimization_parameters.dx_max`: Maximum step size
+- `optimization_parameters.dt_dyn`: Timestep in femtoseconds
+- `optimization_parameters.max_steps`: Maximum number of optimizer steps
+- `optimization_parameters.save_steps`: Trajectory save frequency
+
 Optimization parameters used by `phoboos opt`:
 - `optimization_parameters.tolerance` (default: `1e-2`)
 - `optimization_parameters.dx_max` (default: `0.2`)
@@ -135,11 +267,44 @@ Optimization parameters used by `phoboos opt`:
 - `optimization_parameters.max_steps` (default: `10000`)
 - `optimization_parameters.save_steps` (default: `-1`, save final only)
 
+### Command: `phoboos tssrc`
+
+Transition-state search using NEB, then TS refinement:
+
+```bash
+phoboos tssrc examples/phoboos_spt/input.yaml
+```
+
+What it does:
+- Loads `initial_geometry` and `final_geometry`
+- Aligns the two endpoints before building the NEB band
+- Runs a first NEB relaxation, then a local climbing-image refinement around the highest-energy image
+- Writes the TS guess to an XYZ file and returns the window of images around the barrier
+
+Input parameters used by `phoboos tssrc`:
+- `calculation_parameters.model`: FeNNIX model path
+- `calculation_parameters.device`: Optional device selection
+- `input_parameters.initial_geometry`: Reactant XYZ geometry
+- `input_parameters.final_geometry`: Product XYZ geometry
+- `input_parameters.total_charge`: Optional total charge
+- `search_parameters.effort`: One of `low`, `medium`, or `high`
+- `search_parameters.f_max`: Force threshold for the NEB search stage
+- `search_parameters.max_steps`: Maximum number of NEB search steps
+- `optimization_parameters.f_max`: Force threshold for the final TS optimization stage
+- `optimization_parameters.max_steps`: Maximum number of final TS optimization steps
+
 Notes:
 - `phoboos` writes internal log output to `<initial_geometry_basename>.out` next to the input YAML.
-- Available subcommands include `spt`, `opt`.
+- Available subcommands include `spt`, `freq`, `opt`, and `tssrc`.
 
-Python API examples
+## On the Nudged Elastic Band Transition state search
+
+The Nudged Elastic Band (NEB) method is used to find a minimum energy path (MEP) connecting given reactant and product state minima on the energy surface. An initial path is generated and represented by a discrete set of configurations of the atoms, referred to as images of the system. The number of images is set by the effort parameter (low = 12, mid/high = 20, high conducts a 2 steps scan, see later).
+The most common use of the NEB method is to find the highest energy saddle point on the potential energy surface specifying the transition state for a given initial and final state, also implemented here through the usage of the ASE library.
+Rigorous convergence to a first-order saddle point can be obtained with the climbing image NEB (CI-NEB), where the highest energy image is pushed uphill in energy along the tangent to the path while relaxing downhill in orthogonal directions.
+The method implemented here is the NEB-TS which uses the CI-NEB method with a loose tolerance to begin with and then switches over to the optimization of the transition state to converge on the saddle point.
+A more detailed method has been included in this implementation through the `effort=high` setting, where the objective of the method is to locate a saddle point more accurately with a better resolution compared to CI-NEB calculations. The method is an automatic two-step procedure, where in the first step a CI-NEB calculation is carried out to obtain a rough convergence towards the MEP. Then, the region surrounding the highest energy maximum along the path is identified and a new set of images is distributed along this region, repeating a CI-NEB calculation with less images and giving the resulting ts guess to the optimizer.
+Python API examples:
 
 Read an initial configuration and inspect shapes (example taken from the tests):
 
