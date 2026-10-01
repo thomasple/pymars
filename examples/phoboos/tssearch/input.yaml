@@ -10,8 +10,10 @@ input_parameters:
   total_charge: 0                         # Total molecular charge
 
 optimization_parameters:
-  f_max: 0.2         
-  max_steps: 1000   # Maximum number of optimization steps and search steps for transition state search. Default: 1000
+  f_max: 0.2        # fmax in eV/Angstrom 
+  max_steps: 1000   # Maximum number of optimization steps. Default: 1000
 
 search_parameters:
   effort: "medium"  # Options: 'low', 'medium', 'high'. Default: 'medium'
+  f_max: 0.3        # fmax in eV/Angstrom. NEB-CI step will have a fmax of f_max/2, while this is the fmax for the first search step. Default: 0.1
+  max_steps: 1000   # Maximum number of search steps for transition state search. Default: 1000

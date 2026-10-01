@@ -1,4 +1,5 @@
 import argparse
+from datetime import timedelta
 import yaml
 import os
 import sys
@@ -6,7 +7,10 @@ import sys
 #import numpy as np
 from pymars.__init__ import _Tee
 
+from .utils import _format_runtime
+
 def main():
+    start_time = __import__("time").perf_counter()
 
     parser = argparse.ArgumentParser(prog="phoboos",
         description="phoboos: A FENNIX-powered molecular geometry package"
@@ -217,7 +221,7 @@ def main():
         from .singlepoint import run_spt
         print("Performing single-point energy calculation...")
         run_spt(initial_xyz, model_file=model_file, total_charge=total_charge)
-        print ("\nPhoBOOS terminated normally.")
+        print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
     elif args.command == "freq":
@@ -227,7 +231,7 @@ def main():
         from .frequencies import run_freq
         print("Calculating vibrational frequencies...")
         run_freq(xyz_file=initial_xyz, model_file=model_file, total_charge=total_charge)
-        print ("\nPhoBOOS terminated normally.")
+        print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
         
     elif args.command == "opt":
@@ -251,7 +255,7 @@ def main():
             dxmax=dx_max,
             )
 
-        print ("\nPhoBOOS terminated normally.")
+        print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
     elif args.command == "optts":
@@ -277,38 +281,42 @@ def main():
         print(f"Transition state optimization and frequency calculation completed. Final geometry saved to {ts_file}.")
         print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
         
-        print ("\nPhoBOOS terminated normally.")
+        print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
     elif args.command == "tssrc":
-        max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
+        #for the transition state search command, we need to handle additional parameters specific to transition state search
+        src_fmax = simulation_parameters.get("search_parameters", {}).get("f_max", 0.1)
+        max_search = simulation_parameters.get("search_parameters", {}).get("max_steps", 1000)
         #Set effort level for transition state search (low, medium, high)
         if simulation_parameters.get("search_parameters", {}).get("effort", None) is None:
-            raise ValueError("Missing 'effort' in search_parameters of the input YAML file.")
-        effort = simulation_parameters.get("search_parameters", {}).get("effort", "medium")
+            print("WARNING: 'effort' not specified in search_parameters. Defaulting to 'medium'.")
+            effort = "medium"
+        else:
+            effort = simulation_parameters.get("search_parameters", {}).get("effort", "medium")
 
         #Import optimization parameters for transition state search
-        fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.0003)
-        max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
+        opt_fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.0003)
+        max_opt = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
 
         #import the transition state search function and optimization function
         from .sella_ts import run_tssrc, run_tsopt
 
         if effort == "low":
             # single NEB, 12 images, faster but less accurate path
-            ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge, max_steps=max_steps, mode="loose")
+            ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
         
         elif effort == "medium":
             # single NEB, 20 images, good balance
-            ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_steps, mode="loose")
+            ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
         
         elif effort == "high":
             # first NEB, then refined around the barrier
-            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_steps, mode="tight")
+            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="tight")
         else:
             print(f"WARNING: Unknown effort level: {effort}. Next time, please choose from 'low', 'medium', or 'high'.") 
             print("Proceeding with default 'medium' effort level.")  
-            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_steps, mode="loose")
+            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
 
         #print(f"#DEBUG:Transition state search completed. Transition state guess saved to {ts_file}.")
 
@@ -316,8 +324,8 @@ def main():
             model_file=model_file,
             log_file=log_file_path,
             total_charge=total_charge,
-            fmax=fmax,
-            max_steps=max_steps,
+            fmax=opt_fmax,
+            max_steps=max_opt
             )
         print(f"Transition state optimization completed. Final geometry saved to {ts_optfile}.")
         
@@ -327,10 +335,9 @@ def main():
         from .frequencies import run_freq
         print("Calculating vibrational frequencies...")
         run_freq(xyz_file=ts_file, model_file=model_file, total_charge=total_charge)
-        print(f"Transition state optimization and frequency calculation completed. Final geometry saved to {ts_file}.")
         print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
         
-        print ("\nPhoBOOS terminated normally.")
+        print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
     else:

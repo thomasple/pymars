@@ -101,7 +101,7 @@ def run_tsopt(xyz_file,  model_file, log_file, outfile=None, total_charge=0, fma
     return atoms, output_file
 
 
-def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=None, total_charge=0, max_steps=1000, mode="loose"):
+def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=None, total_charge=0, max_steps=1000, fmax=0.3, mode="loose"):
     "Run a transition state search using Nudged Elastic Band (NEB) method with a FENNIX model"
     " the algorithm ues the NEB-TS approach to find a transition state guess between two endpoints (reactant and product)."
     " In particular, it tries to  loosely optimize every single image along the path to the minimum energy path (MEP)"
@@ -109,7 +109,11 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
     " Once this loose threshold is reached, it terminates the NEB phase early and hands the climbing image's coordinates directly to "
     " a formal analytical Transition State optimizer (OptTS), which tightly converges to a final tolerance"
     #fmax in eV/Angstrom
-    
+    if fmax <= 0:
+        raise ValueError(f"fmax must be a positive value. Received: {fmax}")
+    else:
+        fmax_neb = fmax
+        fmax_ci = fmax / 2.0  # For the climbing image,
     # Setting up inputs for the FENNIX model
     atoms1 = _coerce_atoms(xyz_file1)
     atoms2 = _coerce_atoms(xyz_file2)
@@ -161,14 +165,14 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
 
     opt = LBFGS(neb, trajectory=str(binneb_file), logfile=log_file)
     print("Starting NEB optimization (stage 1: images relaxation)...")
-    opt.run(fmax=0.1, steps=max_steps)
+    opt.run(fmax=fmax_neb, steps=max_steps)
 
     # 5. Activate climbing image and new instance of LBFGS for climbing image optimization
     # stage 2: same band, CI on, medium tolerance, fresh optimizer, smaller steps
     print("NEB optimization stage 2: climbing image...")
     neb.climb = True
     opt = LBFGS(neb, trajectory=str(binneb_file), logfile=str(log_file), maxstep=0.1)
-    opt.run(fmax=0.05, steps=max_steps)
+    opt.run(fmax=fmax_ci, steps=max_steps)
 
     # 6. Find the highest-energy image
     print("Image relaxation complete. Analyzing energies to find highest energy image...")
@@ -189,7 +193,7 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
         neb2.interpolate('idpp')
         opt2 = LBFGS(neb2, trajectory=str(binneb_file), logfile=str(log_file), maxstep=0.1)
         print("NEB optimization stage 3: zoom refinement...")
-        opt2.run(fmax=0.05, steps=max_steps)
+        opt2.run(fmax=fmax_ci, steps=max_steps)
 
         energies2 = [im.get_potential_energy() for im in zooms]
         peak2 = int(np.argmax(energies2[1:-1])) + 1

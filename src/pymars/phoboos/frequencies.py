@@ -113,6 +113,11 @@ def _format_report(atoms, vib, energy_conv):
     for index, (energy_ev, energy_kcalmol) in enumerate(zip(energies, energies_kcalmol), start=1):
         lines.append(f"{index:6d}{energy_ev:13.6f}{energy_kcalmol:15.6f}")
 
+    lines.append("")
+    lines.append(" Vibrational frequencies:")
+    for index, freq in enumerate(freqs, start=1):
+        lines.append(f"{index:6d}: {freq:12.4f} cm^-1")
+
     return "\n".join(lines)
 
 def run_freq(xyz_file, model_file, outfile=None, total_charge=0):
