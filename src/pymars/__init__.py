@@ -306,6 +306,9 @@ def main() -> None:
         simulation_parameters["torch_device"] = "cuda:0"  # Always cuda:0 within visible set
         device = "gpu"
 
+    #Verbose print of initial geometry
+    _vprint(f"# Using initial geometry: {initial_xyz}")
+
     # Now import jax (AFTER environment is set)
     import jax
     import jax.numpy as jnp
