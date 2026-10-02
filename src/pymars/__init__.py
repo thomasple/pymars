@@ -210,7 +210,7 @@ def main() -> None:
     # Print installed package path (directory containing this __init__.py module).
     _vprint(f"# Installation path: {os.path.dirname(os.path.abspath(__file__))}")
     # Print execution folder (working directory where the command is run, which may differ from installation path).
-    _vprint(f"# Running from folder: {os.getcwd()}")
+    print(f"# Running from folder: {os.getcwd()}")
 
     # Set FENNOL_MODULES_PATH BEFORE any fennol imports
     # This must be done before importing utils (which imports fennol) and md (which imports fennol)
@@ -424,7 +424,7 @@ def main() -> None:
 
     _vprint(f"# NumPy version: {np.__version__}")
     _vprint(f"# SciPy version: {scipy_version}")
-    _vprint(f"# PyMARS version: {__version__}")  
+    print(f"# PyMARS version: {__version__}")  
     _vprint(
         "# Hardware: "
         f"{platform.system()} {platform.release()} | "
@@ -586,7 +586,7 @@ def main() -> None:
     else:
         raise ValueError("Either step_dyn or simulation_time must be specified")
     
-    _vprint(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt_fs} fs)")
+    print(f"# Running simulation for {simulation_time} ps ({n_steps} steps of {dt_fs} fs)")
 
     # Get output parameters
     save_steps = general_params.get("save_steps", general_params.get("print_step", 100))
@@ -731,7 +731,7 @@ def main() -> None:
     
     header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
     if batch_size == 1:
-        print(header)
+        _vprint(header)
 
     for istep in range(start_step, n_steps):
         coordinates, velocities, accelerations, energies, energy_data, charges, frame_variance = integrate(
@@ -774,7 +774,7 @@ def main() -> None:
 
             line = f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
             if batch_size == 1:
-                print(line)
+                _vprint(line)
 
             if write_traj:
                 coords = np.array(coordinates)
@@ -905,7 +905,7 @@ def main() -> None:
     from fennol.utils.io import human_time_duration
     total_time = time.time() - time_start
     nsperday = (simulation_time / total_time)*60*60*24*us.NS
-    _vprint(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
+    print(f"# {simulation_time*us.PS} ps simulation completed in {human_time_duration(total_time)} ({nsperday:.1f} ns/day)")
 
     # ================================================================ #
     # Batch artifact export: move per-trajectory outputs into SIMXXXXX dirs
