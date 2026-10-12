@@ -28,7 +28,7 @@ def _coerce_atoms(endpoint):
     return read(endpoint)
 
 
-def run_tsopt(xyz_file,  model_file, log_file, outfile=None, total_charge=0, fmax=0.05, max_steps=1000):
+def run_tsopt(xyz_file,  model_file, log_file, outfile=None, total_charge=0, fmax=0.2, max_steps=1000):
     "Optimize the molecular geometry of a transition state using a FENNIX model and Sella optimizer(RS-PRFO)"
 
     atoms = _coerce_atoms(xyz_file)

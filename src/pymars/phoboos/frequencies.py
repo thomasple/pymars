@@ -163,7 +163,7 @@ def run_freq(xyz_file, model_file, outfile=None, total_charge=0):
     # Energy unit conversion: ase outputs in eV, convert to kcal/mol
     energy_conv = us.KCALPERMOL / us.EV
     atoms.calc = FENNIXCalculator(model, inputs=inputs, gpu_preprocessing=True)
-    print(f"#DEBUG: Energy and max force before vibrational analysis: {atoms.get_potential_energy() * energy_conv:.6f} kcal/mol, max force = {np.abs(atoms.get_forces()).max() * energy_conv:.6f} kcal/mol/Å")
+    #print(f"#DEBUG: Energy and max force before vibrational analysis: {atoms.get_potential_energy() * energy_conv:.6f} kcal/mol, max force = {np.abs(atoms.get_forces()).max() * energy_conv:.6f} kcal/mol/Å")
 
     vib = Vibrations(atoms)
     vib.run()

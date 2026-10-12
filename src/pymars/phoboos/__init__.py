@@ -286,7 +286,7 @@ def main():
 
     elif args.command == "tssrc":
         #for the transition state search command, we need to handle additional parameters specific to transition state search
-        src_fmax = simulation_parameters.get("search_parameters", {}).get("f_max", 0.1)
+        src_fmax = simulation_parameters.get("search_parameters", {}).get("f_max", 0.3)
         max_search = simulation_parameters.get("search_parameters", {}).get("max_steps", 1000)
         #Set effort level for transition state search (low, medium, high)
         if simulation_parameters.get("search_parameters", {}).get("effort", None) is None:
@@ -296,7 +296,7 @@ def main():
             effort = simulation_parameters.get("search_parameters", {}).get("effort", "medium")
 
         #Import optimization parameters for transition state search
-        opt_fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.0003)
+        opt_fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.2)
         max_opt = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
 
         #import the transition state search function and optimization function

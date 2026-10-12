@@ -9,5 +9,5 @@ input_parameters:
   total_charge: 0                        # Total molecular charge
 
 optimization_parameters:
-  f_max: 0.2         
-  max_steps: 1000   # Maxumum number of optimization steps
+  f_max: 0.2        # fmax in eV/Angstrom   Default: 0.2 
+  max_steps: 1000   # Maximum number of optimization steps
