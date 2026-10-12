@@ -218,18 +218,26 @@ Input parameters used by `phoboos spt`:
 
 ### Command: `phoboos freq`
 
-Single-point energy followed by vibrational analysis:
+Single-point energy plus harmonic vibrational analysis:
 
 ```bash
 phoboos freq examples/phoboos_spt/input.yaml
 ```
 
 What it does:
-- Runs a single-point energy evaluation first
-- Re-centers the geometry, aligns the principal axes, and performs a harmonic vibrational analysis
-- Prints the vibrational report and the per-mode frequency sequence in cm^-1
+- Reads the geometry and sets up a FENNIX ASE calculator.
+- Centers the structure on its center of mass.
+- Rotates into the principal-axes frame before the vibrational calculation.
+- Calls ASE `Vibrations` to compute the finite-difference Hessian and normal modes.
+- Prints a formatted vibrational report with frequencies, reduced masses, force constants, and per-mode energies.
 
-Input parameters used by `phoboos freq`:
+Implementation details:
+- `run_freq` converts the input geometry to an ASE `Atoms` object, attaches a `FENNIXCalculator(model, inputs=..., gpu_preprocessing=True)`, and then calls `Vibrations(atoms)`.
+- The code explicitly normalizes the geometry before the Hessian step: center of mass removal and principal-axis alignment are done to reduce rotational/translational artifacts.
+- The report is built in `_format_report()`, which reshapes each mode, estimates reduced masses, converts to force constants, and prints real frequencies with imaginary modes kept negative.
+- The final output includes the block report and a one-line-per-mode frequency list in cm^-1, matching the runtime behavior currently implemented in `pymars.phoboos.frequencies`.
+
+Input parameters used are the same as `phoboos spt`:
 - `calculation_parameters.model`: FeNNIX model path
 - `calculation_parameters.device`: Optional device selection
 - `input_parameters.initial_geometry`: Starting XYZ geometry
@@ -244,10 +252,17 @@ phoboos opt examples/phoboos_opt/input.yaml
 ```
 
 What it does:
-- Loads initial geometry and FeNNIX model
-- Runs optimization with parameters from `optimization_parameters`
-- Writes optimization trajectory according to `save_steps`
-- Stops at convergence (`tolerance`) or when `max_steps` is reached
+- Loads the initial geometry and FeNNIX model.
+- Runs an iterative geometry optimization using the FIRE algorithm.
+- Writes an optimization trajectory when `save_steps > 0`.
+- Stops at convergence (`tolerance`) or when `max_steps` is reached.
+
+Implementation notes:
+- The actual optimizer is the FENNOL helper `optimize_fire2`, not a custom minimizer implemented in pymars.
+- The code passes `atol=tolerance`, `dt=dt_ps`, `Nmax=max_steps`, `logoutput=True`, `keep_every=keep_every`, and `max_disp=dxmax` to the FIRE routine.
+- In practice, FIRE is a damped, velocity-assisted gradient descent: it maintains a pseudo-velocity, scales the step dynamically to accelerate downhill motion, and reduces or resets the velocity when the descent direction turns unfavorable.
+- The `dxmax` parameter curbs the maximum displacement per step, which keeps large jumps from occurring during the line-search/relaxation phase.
+- The final energy is re-evaluated with the FENNIX model and the optimized geometry is written to `<basename>.opt.xyz` unless `outfile` is explicitly set.
 
 Input parameters used by `phoboos opt`:
 - `calculation_parameters.model`: FeNNIX model path
@@ -267,6 +282,25 @@ Optimization parameters used by `phoboos opt`:
 - `optimization_parameters.max_steps` (default: `10000`)
 - `optimization_parameters.save_steps` (default: `-1`, save final only)
 
+### Command: `phoboos optts`
+
+Transition-state optimization (Sella / RS-PRFO):
+
+```bash
+phoboos optts examples/phoboos_spt/input.yaml
+```
+
+What it does:
+- Starts from a guess geometry and optimizes it as a first-order saddle point.
+- Uses ASE/Sella rather than a minimum-energy optimizer.
+- Writes the optimized TS guess to a `.tsopt.xyz` file and then evaluates its energy and vibrational spectrum.
+
+Implementation details:
+- The solver is `Sella(atoms, order=1, trajectory=..., logfile=...)`.
+- `order=1` tells Sella to optimize for a transition state (first-order saddle point), while `order=0` would target a minimum.
+- The CLI passes `fmax` and `max_steps` from `optimization_parameters` to `opt.run(fmax=fmax, steps=max_steps)`.
+- After the optimization, the code evaluates a single-point energy and runs `run_freq` on the final structure.
+
 ### Command: `phoboos tssrc`
 
 Transition-state search using NEB, then TS refinement:
@@ -276,10 +310,20 @@ phoboos tssrc examples/phoboos_spt/input.yaml
 ```
 
 What it does:
-- Loads `initial_geometry` and `final_geometry`
-- Aligns the two endpoints before building the NEB band
-- Runs a first NEB relaxation, then a local climbing-image refinement around the highest-energy image
-- Writes the TS guess to an XYZ file and returns the window of images around the barrier
+- Loads `initial_geometry` and `final_geometry`.
+- Aligns the endpoints before creating the band.
+- Builds an NEB path between the reactant and product states using ASE `NEB` images.
+- Runs a loose NEB relaxation, identifies the highest-energy image, and then performs a climbing-image refinement.
+- For `effort=high`, the path is refined around the barrier with a zoomed refinement stage.
+- Transfers the resulting TS guess to a Sella optimization for final saddle-point convergence.
+
+Implementation details:
+- `run_tssrc` creates a list of image structures and attaches a `FENNIXCalculator` to each image.
+- It uses `NEB(images, method='improvedtangent', climb=False)`, interpolates the path with `idpp`, and relaxes the band using `LBFGS`.
+- The code then activates `neb.climb = True` and re-runs `LBFGS` to push the highest-energy image uphill while relaxing the rest of the band.
+- The highest-energy image is selected from the resulting path and used as the TS guess.
+- For `mode='tight'`, the code creates a local refinement band around the peak and repeats the NEB relaxation on a reduced segment.
+- The final TS guess is written out as `ts_guess.xyz`, and the CLI then calls `run_tsopt` on that geometry for the final saddle-point optimization.
 
 Input parameters used by `phoboos tssrc`:
 - `calculation_parameters.model`: FeNNIX model path
@@ -299,11 +343,40 @@ Notes:
 
 ## On the Nudged Elastic Band Transition state search
 
-The Nudged Elastic Band (NEB) method is used to find a minimum energy path (MEP) connecting given reactant and product state minima on the energy surface. An initial path is generated and represented by a discrete set of configurations of the atoms, referred to as images of the system. The number of images is set by the effort parameter (low = 12, mid/high = 20, high conducts a 2 steps scan, see later).
-The most common use of the NEB method is to find the highest energy saddle point on the potential energy surface specifying the transition state for a given initial and final state, also implemented here through the usage of the ASE library.
-Rigorous convergence to a first-order saddle point can be obtained with the climbing image NEB (CI-NEB), where the highest energy image is pushed uphill in energy along the tangent to the path while relaxing downhill in orthogonal directions.
-The method implemented here is the NEB-TS which uses the CI-NEB method with a loose tolerance to begin with and then switches over to the optimization of the transition state to converge on the saddle point.
-A more detailed method has been included in this implementation through the `effort=high` setting, where the objective of the method is to locate a saddle point more accurately with a better resolution compared to CI-NEB calculations. The method is an automatic two-step procedure, where in the first step a CI-NEB calculation is carried out to obtain a rough convergence towards the MEP. Then, the region surrounding the highest energy maximum along the path is identified and a new set of images is distributed along this region, repeating a CI-NEB calculation with less images and giving the resulting ts guess to the optimizer.
+The transition-state workflow implemented here is a two-level ASE-based search:
+
+1. A coarse NEB search over a path connecting reactant and product images.
+2. A final `Sella` saddle-point refinement on the best TS guess.
+
+The Nudged Elastic Band (NEB) method is used to find a minimum energy path (MEP) connecting two minima on the potential-energy surface. In practice, the code builds a chain of structural images between the endpoints, interpolates them with an IDPP guess, and relaxes the path while preserving even spacing along the path. The highest-energy image is then treated as the candidate transition state.
+
+The implementation is not a fully custom NEB code; it uses ASE `NEB` and `LBFGS` directly. In `run_tssrc`, the path is initialized as:
+
+```python
+images = [atoms1] + [atoms1.copy() for _ in range(n_images)] + [atoms2]
+neb = NEB(images, method='improvedtangent', climb=False)
+neb.interpolate('idpp')
+opt = LBFGS(neb, trajectory=str(binneb_file), logfile=log_file)
+opt.run(fmax=fmax_neb, steps=max_steps)
+```
+
+This is followed by a climbing-image stage:
+
+```python
+neb.climb = True
+opt = LBFGS(neb, trajectory=str(binneb_file), logfile=str(log_file), maxstep=0.1)
+opt.run(fmax=fmax_ci, steps=max_steps)
+```
+
+This phase is the key CI-NEB step: the image with the largest energy is driven uphill along the local tangent while the other images relax downhill in the orthogonal directions. The code then selects the highest-energy image as the rough transition-state guess.
+
+The `effort` setting controls the search strategy:
+- `low`: 12 images, loose CI-NEB search.
+- `medium`: 20 images, loose CI-NEB search.
+- `high`: 20 images plus a zoom refinement around the peak image before handing the best candidate to the final TS optimizer.
+
+After the NEB search, the code passes the saddle guess into Sella (`order=1`) for a final transition-state optimization. This is the same RS-PRFO-style optimization used by `phoboos optts` and is intended to converge the approximate NEB image into a true first-order saddle point.
+
 Python API examples:
 
 Read an initial configuration and inspect shapes (example taken from the tests):
@@ -482,26 +555,33 @@ Notes:
 ```
 
 API summary
+
+The signatures below match the current(1.7.5) implementation in the dev package and include the optional arguments exposed by the source docstrings.
+
 - `pymars.initial_configuration`
-  - `read_initial_configuration(path)` — read and center an XYZ; returns `(species, coordinates)`.
-  - `sample_velocities(species, temperature)` — Maxwell–Boltzmann velocities.
-  - `remove_com_velocity(coordinates, velocities, species)` — remove COM translation & rotation.
-  - `sample_projectiles(...)` — sample projectile positions and velocities.
+  - `read_initial_configuration(filename)` — read and center an XYZ; returns `(species, coordinates)`.
+  - `sample_velocities(species, temperature, rng=None, dtype=None)` — Maxwell–Boltzmann velocities with optional RNG/dtype control.
+  - `remove_com_velocity(coordinates, velocities, species)` — remove COM translation and rigid-body rotation.
+  - `sample_projectiles(n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18, rng=None, dtype=None)` — sample projectile positions and velocities for collision setups.
 
 - `pymars.rotation_utils`
-  - `apply_random_rotation(coords, n_rotations=None)` — apply one or many random rotations.
-  - `uniform_orientation(n, indices=None)` — generate a Fibonacci lattice on the unit sphere.
-  - `random_orientations(size, n=10000)` — sample orientations from a grid.
+  - `apply_random_rotation(coords, n_rotations=None, rng=None)` — apply one or many random rotations.
+  - `uniform_orientation(n, indices=None, offset=0.5)` — generate a Fibonacci-lattice spherical sampling grid.
+  - `apply_fibonacci_random_rotation(coords, n=1000, n_rotations=None)` — generate a rotation from Fibonacci-sampled axes.
+  - `random_orientations(size, n=10000)` — sample random orientations from a uniform spherical grid.
 
 - `pymars.repulsion`
-  - `setup_repulsion_potential(target_species, projectile_species)` — returns a function computing short-range repulsive energies and forces (ZBL-like).
+  - `setup_repulsion_potential(target_species, projectile_species, use_jax=False)` — returns a function computing short-range repulsive energies and forces (ZBL-like).
 
 - `pymars.md`
-  - `initialize_collision_simulation(simulation_parameters)` — prepare all arrays and return a dict with keys `integrate`, `coordinates`, `velocities`, `accelerations`, `species`, `masses`, `dt`, etc.
+  - `initialize_collision_simulation(simulation_parameters, verbose=True)` — prepare all arrays and return a dict with keys including `integrate`, `coordinates`, `velocities`, `accelerations`, `species`, `masses`, `dt`, and batch metadata. The function supports both nested and legacy flat configuration layouts.
 
 - `pymars.utils`
   - `us` — unit system (L=angstrom, T=ps, E=kcal/mol)
-  - helpers to format batched conformations used by FeNNol models.
+  - `format_batch_conformations(species, coordinates, total_charge=0)` — pack batched coordinates into the FeNNol conformation dict format.
+  - `update_conformation(conformation, new_coordinates)` — replace coordinates in a packed conformation.
+  - `get_composition_string(species)` — build a composition string such as `O1_H2`.
+  - `write_xyz_frame(...)` — write a single XYZ frame, including optional charges and a custom comment line.
 
 Initial state saving and reproducibility
 ------------------------------------------
