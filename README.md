@@ -146,7 +146,298 @@ The main collision-simulation example currently includes these sections and keys
   - `track_variance`: Add a `Var(eV^2)` column when the model exposes `etot_ensemble_var`.
   - `summary_file`: Summary output filename.
 
-PhoBOOS commands (`spt`, `freq`, `opt`, `optts`, `tssrc`)
+
+Python API examples:
+
+Read an initial configuration and inspect shapes (example taken from the tests):
+
+```python
+from pymars.initial_configuration import read_initial_configuration
+
+species, coordinates = read_initial_configuration('tests/aspirin.xyz')
+print(species.shape, coordinates.shape)  # (21,), (21, 3)
+```
+
+Sample velocities and remove global translation/rotation:
+
+```python
+from pymars.initial_configuration import sample_velocities, remove_com_velocity
+
+velocities = sample_velocities(species, temperature=300.0)
+velocities = remove_com_velocity(coordinates, velocities, species)
+```
+
+Generate projectile initial positions and velocities:
+
+```python
+from pymars.initial_configuration import sample_projectiles
+
+projectile_positions, projectile_velocities = sample_projectiles(
+    n_projectiles=100,
+    temperature=300.0,
+    distance=20.0,
+    max_impact_parameter=0.8,
+    projectile_species=6,  # C
+)
+```
+
+Create and run a short batched collision simulation (calls into FeNNol for model energies):
+
+```python
+from pymars.md import initialize_collision_simulation
+
+config = {
+    'calculation_parameters': {
+        'model': '/path/to/fennix_model',
+    },
+    'input_parameters': {
+        'initial_geometry': 'tests/aspirin.xyz',
+        'total_charge': 0,
+        'random_rotation': True,
+    },
+    'general_parameters': {
+        'temperature': 300.0,
+        'batch_size': 2,
+        'seed': 12345,
+        'save_steps': 100,
+        'save_energy': 100,
+    },
+    'projectile_parameters': {
+        'projectile_flag': True,
+        'projectile_species': 18,
+        'projectile_temperature': 3000.0,
+        'projectile_distance': 30.0,
+        'max_impact_parameter': 1.0,
+    },
+    'thermostat_parameters': {
+        'NO_thermostat': True,
+        'LGV_thermostat': False,
+        'gamma': 0.0,
+    },
+    'dynamic_parameters': {
+        'dt_dyn': 1.0,
+        'step_dyn': 1000,
+    },
+}
+
+system = initialize_collision_simulation(config)
+integrate = system['integrate']
+coords = system['coordinates']
+vels = system['velocities']
+accs = system['accelerations']
+
+# Setup energy output (optional)
+energy_files = ['traj_0.out', 'traj_1.out']
+save_energy = 100  # Write every 100 steps
+
+# perform a few integration steps
+for i in range(10):
+    coords, vels, accs, energies = integrate(
+        coords, vels, accs,
+        step=i,
+        energy_output_file=energy_files,
+        energy_steps=save_energy
+    )
+    print('Step', i, 'E_total mean:', energies.mean())
+```
+
+**Energy Output Format:**
+
+When `energy_output_file` is specified, pymars writes energy data in FeNNol-compatible format:
+
+```
+    Step   Time[fs]       Etot       Epot       Ekin    Temp[K]
+       0      0.0000   -123.456789  -125.678901    2.222112    300.00
+     100    100.0000   -123.457890  -124.567890    1.109999    250.12
+```
+
+Columns:
+- `Step`: Integration step number
+- `Time[fs]`: Time in femtoseconds
+- `Etot`: Total energy (kcal/mol)
+- `Epot`: Potential energy (kcal/mol)  
+- `Ekin`: Kinetic energy (kcal/mol)
+- `Temp[K]`: Temperature (Kelvin)
+
+**Per-trajectory energy filenames (batch mode):**
+
+When running with `batch_size > 1` and a single configured filename, pymars inserts the trajectory index before the file extension using `os.path.splitext`. Examples:
+- `energies.out` → `energies_0.out`, `energies_1.out`, …
+- `energies` → `energies_0`, `energies_1`, …
+- `my.out.file` → `my.out_0.file`, `my.out_1.file`, …
+
+Batch output and SIM export
+---------------------------
+
+When running batch simulations (`batch_size > 1`), pymars automatically organizes per-trajectory outputs into timestamped simulation folders (`SIM00000`, `SIM00001`, …):
+
+- **SIM folder creation**: One folder per trajectory, numbered sequentially based on existing folders (e.g., if `SIM00000` and `SIM00001` exist, the next batch starts at `SIM00002`).
+- **Artifact organization**: Per-trajectory output files are moved and renamed into their respective SIM folder:
+  - Trajectory file (e.g., `trajectory_0.xyz` → `trajectory.xyz` in `SIM00000`)
+  - Energy file (e.g., `energies_0.out` → `energies.out` in `SIM00000`)
+  - Summary file (e.g., `summary_0.out` → `summary.out` in `SIM00000`)
+  - This makes each SIM folder self-contained with consistently-named output files.
+- **Input YAML copy with per-trajectory seed**: The input configuration YAML is copied into each SIM folder and its `seed:` line is rewritten to contain that trajectory's assigned seed. This enables easy reproduction of any single trajectory from the batch.
+
+Example batch output structure after a 3-trajectory run:
+```
+SIM00000/
+  trajectory.xyz
+  energies.out
+  summary.out
+  input.yaml          # seed: 11
+SIM00001/
+  trajectory.xyz
+  energies.out
+  summary.out
+  input.yaml          # seed: 22
+SIM00002/
+  trajectory.xyz
+  energies.out
+  summary.out
+  input.yaml          # seed: 33
+```
+
+Restart files and variance tracking
+---------------------------------
+
+Restart files
+: When a run finishes pymars saves the last state to a restart file so you can resume later. The restart filename is derived from the input geometry basename and is written next to the input YAML (for example, when your YAML is `examples/input.yaml` the restart file will be `examples/<base>.dyn.restart.npz`). numpy's `savez` is used, so the on-disk file ends with `.npz`.
+
+To resume a run set `calculation_parameters.restart_traj: true` in your YAML. pymars will look for `<base>.dyn.restart` and `<base>.dyn.restart.npz` next to the YAML and load positions/velocities/accelerations and the saved `step` if present.
+
+Variance tracking (model-provided)
+: If your FeNNol model exposes an ensemble variance per-frame named `etot_ensemble_var` pymars can record it in the energy output. Enable this with:
+
+```yaml
+output_details:
+  energies_file: "energies.out"
+  track_variance: true
+```
+
+When enabled, the energies file will include an additional column `Var(eV^2)` (the model-provided variance; units are left as eV^2). The variance value is written only in the energy output file (`energies.out`) and is **not** printed in the regular console summary to avoid spurious `None` values when the model does not provide variance.
+
+Notes:
+- If your model does not provide `etot_ensemble_var`, the `Var(eV^2)` column will contain `None` for that frame.
+- `track_variance` is meaningful only for single-trajectory runs (batch_size == 1). If `track_variance: true` and `batch_size > 1` pymars will disable the option and print a warning because the ensemble variance per-frame is not defined across parallel trajectories.
+
+API summary
+
+The signatures below match the current(1.7.5) implementation in the dev package and include the optional arguments exposed by the source docstrings.
+
+- `pymars.initial_configuration`
+  - `read_initial_configuration(filename)` — read and center an XYZ; returns `(species, coordinates)`.
+  - `sample_velocities(species, temperature, rng=None, dtype=None)` — Maxwell–Boltzmann velocities with optional RNG/dtype control.
+  - `remove_com_velocity(coordinates, velocities, species)` — remove COM translation and rigid-body rotation.
+  - `sample_projectiles(n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18, rng=None, dtype=None)` — sample projectile positions and velocities for collision setups.
+
+- `pymars.rotation_utils`
+  - `apply_random_rotation(coords, n_rotations=None, rng=None)` — apply one or many random rotations.
+  - `uniform_orientation(n, indices=None, offset=0.5)` — generate a Fibonacci-lattice spherical sampling grid.
+  - `apply_fibonacci_random_rotation(coords, n=1000, n_rotations=None)` — generate a rotation from Fibonacci-sampled axes.
+  - `random_orientations(size, n=10000)` — sample random orientations from a uniform spherical grid.
+
+- `pymars.repulsion`
+  - `setup_repulsion_potential(target_species, projectile_species, use_jax=False)` — returns a function computing short-range repulsive energies and forces (ZBL-like).
+
+- `pymars.md`
+  - `initialize_collision_simulation(simulation_parameters, verbose=True)` — prepare all arrays and return a dict with keys including `integrate`, `coordinates`, `velocities`, `accelerations`, `species`, `masses`, `dt`, and batch metadata. The function supports both nested and legacy flat configuration layouts.
+
+- `pymars.utils`
+  - `us` — unit system (L=angstrom, T=ps, E=kcal/mol)
+  - `format_batch_conformations(species, coordinates, total_charge=0)` — pack batched coordinates into the FeNNol conformation dict format.
+  - `update_conformation(conformation, new_coordinates)` — replace coordinates in a packed conformation.
+  - `get_composition_string(species)` — build a composition string such as `O1_H2`.
+  - `write_xyz_frame(...)` — write a single XYZ frame, including optional charges and a custom comment line.
+
+Initial state saving and reproducibility
+------------------------------------------
+
+Initial conditions replay (batch → single trajectory)
+: When running batch simulations (`batch_size > 1`), pymars saves the exact initial conditions (positions, velocities, accelerations) for each trajectory:
+- **Single trajectory**: saved to `<xyzfilename>.dyn.init.npz` in the simulation folder
+- **Batch**: saved to `<xyzfilename>.batchdyn.init.npz` in the parent directory
+
+These files are controlled by the `save_initial` flag (default `true`). When set to `false`, no initial state files are written.
+
+To reproduce a single trajectory from a batch run:
+1. Locate the trajectory's `<xyzfilename>.dyn.init.npz` file in its `SIMXXXXX` folder
+2. Run with `batch_size: 1` and the per-trajectory seed; pymars will automatically load the saved initial state (when `restart_traj: false`)
+3. This ensures bit-identical initial conditions
+
+**Important note**: Floating-point arithmetic depends on batch shape (batch_size). Running a trajectory extracted from a batch with `batch_size: 1` will have slightly different numerical paths due to:
+- Different vectorization order in JAX/NumPy operations
+- Different floating-point reduction sequences
+
+For bit-wise reproducibility across trajectories and batches, use `save_initial: true` (default).
+
+Seeding and random number generation
+: pymars uses NumPy's modern Generator API (`np.random.default_rng(seed)`) with per-trajectory seeding:
+
+**Seed configuration**:
+- User provides one seed per trajectory via `general_parameters.seed`:
+  - Single scalar (for `batch_size: 1`) → used directly
+  - List/tuple/array → one seed per trajectory (must match batch_size)
+  - Comma-separated string (for batch runs) → split into per-trajectory seeds
+  - Missing/`null` → random unique seeds are generated per trajectory
+- For batch runs (`batch_size > 1`), all seeds must be **unique**; duplicates in user-provided lists trigger an error; duplicates in auto-generated lists are regenerated
+- Output logs print the resolved per-trajectory seed list for reference
+
+**How seeds are used**:
+Each trajectory gets its own NumPy Generator seeded with `seed_list[b]`. This RNG drives:
+- Random orientation sampling (via `scipy.spatial.transform.Rotation.random(..., random_state=rng_b)`)
+- Initial velocity sampling (Maxwell–Boltzmann via `rng_b.normal(...)`)
+- Projectile initial conditions sampling
+- Any other stochastic initialization
+
+Same seed → identical internal RNG state → **identical random sequences** (assuming same NumPy/SciPy versions and execution order).
+
+**NumPy Generator details**:
+Modern NumPy (`>= 1.17`) uses `Generator(PCG64)` by default:
+- `np.random.default_rng(seed)` creates a Generator with a PCG64 BitGenerator
+- The seed is used to initialize the BitGenerator's internal state
+- Each call to the RNG (e.g., `.normal()`, `.uniform()`) applies deterministic transformations to the internal state
+- Same seed → same state sequence → identical outputs
+
+
+**Reproducibility metadata**:
+At startup, pymars prints:
+- NumPy version and SciPy version
+- Hardware/platform info (OS, release, machine, processor)
+
+Recording these alongside your seed list ensures **full reproducibility** across machines and time:
+For example:
+
+```
+# Per-trajectory seeds:
+# trajectory         seed
+#          0    1234567890
+# NumPy version: 1.26.4
+# SciPy version: 1.11.4
+# Hardware: Linux 5.15.0-1234 x86_64 | processor=Intel(R) Core(TM) i7-11700K AT
+# Coordinate dtype: float32
+```
+
+**Note on reproducibility across batch sizes**: Different batch sizes lead to different JAX/NumPy vectorization paths and floating-point reduction orders, even with identical seeds. For guaranteed numerical reproducibility, use identical batch sizes, versions, and machine.
+
+Floating-point precision
+: By default, pymars uses single precision (float32) for coordinates, velocities, and rotations. Set `calculation_parameters.double_precision: true` to use float64:
+
+```yaml
+calculation_parameters:
+  double_precision: true  # Use float64 for coordinates and velocities
+```
+
+Masses and atomic species remain in float32 for efficiency. The flag is printed at runtime:
+```
+# Coordinate dtype: float64
+```
+
+**Note**: Double precision reduces but does not eliminate numerical divergence in chaotic dynamics (MD trajectories). For guaranteed reproducibility, use identical batch shapes and NumPy/SciPy versions.
+
+# PhOBOOS Toolkit
+
+## PhoBOOS commands (`spt`, `freq`, `opt`, `optts`, `tssrc`)
 --------------------------
 
 `phoboos` is the geometry-focused companion CLI (entry point: `phoboos = pymars.phoboos:main`).
@@ -389,310 +680,21 @@ The `effort` setting controls the search strategy:
 
 After the NEB search, the code passes the saddle guess into Sella (`order=1`) for a final transition-state optimization. This is the same RS-PRFO-style optimization used by `phoboos optts` and is intended to converge the approximate NEB image into a true first-order saddle point.
 
-# Pymars 
-Python API examples:
+# Further info 
 
-Read an initial configuration and inspect shapes (example taken from the tests):
-
-```python
-from pymars.initial_configuration import read_initial_configuration
-
-species, coordinates = read_initial_configuration('tests/aspirin.xyz')
-print(species.shape, coordinates.shape)  # (21,), (21, 3)
-```
-
-Sample velocities and remove global translation/rotation:
-
-```python
-from pymars.initial_configuration import sample_velocities, remove_com_velocity
-
-velocities = sample_velocities(species, temperature=300.0)
-velocities = remove_com_velocity(coordinates, velocities, species)
-```
-
-Generate projectile initial positions and velocities:
-
-```python
-from pymars.initial_configuration import sample_projectiles
-
-projectile_positions, projectile_velocities = sample_projectiles(
-    n_projectiles=100,
-    temperature=300.0,
-    distance=20.0,
-    max_impact_parameter=0.8,
-    projectile_species=6,  # C
-)
-```
-
-Create and run a short batched collision simulation (calls into FeNNol for model energies):
-
-```python
-from pymars.md import initialize_collision_simulation
-
-config = {
-    'calculation_parameters': {
-        'model': '/path/to/fennix_model',
-    },
-    'input_parameters': {
-        'initial_geometry': 'tests/aspirin.xyz',
-        'total_charge': 0,
-        'random_rotation': True,
-    },
-    'general_parameters': {
-        'temperature': 300.0,
-        'batch_size': 2,
-        'seed': 12345,
-        'save_steps': 100,
-        'save_energy': 100,
-    },
-    'projectile_parameters': {
-        'projectile_flag': True,
-        'projectile_species': 18,
-        'projectile_temperature': 3000.0,
-        'projectile_distance': 30.0,
-        'max_impact_parameter': 1.0,
-    },
-    'thermostat_parameters': {
-        'NO_thermostat': True,
-        'LGV_thermostat': False,
-        'gamma': 0.0,
-    },
-    'dynamic_parameters': {
-        'dt_dyn': 1.0,
-        'step_dyn': 1000,
-    },
-}
-
-system = initialize_collision_simulation(config)
-integrate = system['integrate']
-coords = system['coordinates']
-vels = system['velocities']
-accs = system['accelerations']
-
-# Setup energy output (optional)
-energy_files = ['traj_0.out', 'traj_1.out']
-save_energy = 100  # Write every 100 steps
-
-# perform a few integration steps
-for i in range(10):
-    coords, vels, accs, energies = integrate(
-        coords, vels, accs,
-        step=i,
-        energy_output_file=energy_files,
-        energy_steps=save_energy
-    )
-    print('Step', i, 'E_total mean:', energies.mean())
-```
-
-**Energy Output Format:**
-
-When `energy_output_file` is specified, pymars writes energy data in FeNNol-compatible format:
-
-```
-    Step   Time[fs]       Etot       Epot       Ekin    Temp[K]
-       0      0.0000   -123.456789  -125.678901    2.222112    300.00
-     100    100.0000   -123.457890  -124.567890    1.109999    250.12
-```
-
-Columns:
-- `Step`: Integration step number
-- `Time[fs]`: Time in femtoseconds
-- `Etot`: Total energy (kcal/mol)
-- `Epot`: Potential energy (kcal/mol)  
-- `Ekin`: Kinetic energy (kcal/mol)
-- `Temp[K]`: Temperature (Kelvin)
-
-**Per-trajectory energy filenames (batch mode):**
-
-When running with `batch_size > 1` and a single configured filename, pymars inserts the trajectory index before the file extension using `os.path.splitext`. Examples:
-- `energies.out` → `energies_0.out`, `energies_1.out`, …
-- `energies` → `energies_0`, `energies_1`, …
-- `my.out.file` → `my.out_0.file`, `my.out_1.file`, …
-
-Batch output and SIM export
----------------------------
-
-When running batch simulations (`batch_size > 1`), pymars automatically organizes per-trajectory outputs into timestamped simulation folders (`SIM00000`, `SIM00001`, …):
-
-- **SIM folder creation**: One folder per trajectory, numbered sequentially based on existing folders (e.g., if `SIM00000` and `SIM00001` exist, the next batch starts at `SIM00002`).
-- **Artifact organization**: Per-trajectory output files are moved and renamed into their respective SIM folder:
-  - Trajectory file (e.g., `trajectory_0.xyz` → `trajectory.xyz` in `SIM00000`)
-  - Energy file (e.g., `energies_0.out` → `energies.out` in `SIM00000`)
-  - Summary file (e.g., `summary_0.out` → `summary.out` in `SIM00000`)
-  - This makes each SIM folder self-contained with consistently-named output files.
-- **Input YAML copy with per-trajectory seed**: The input configuration YAML is copied into each SIM folder and its `seed:` line is rewritten to contain that trajectory's assigned seed. This enables easy reproduction of any single trajectory from the batch.
-
-Example batch output structure after a 3-trajectory run:
-```
-SIM00000/
-  trajectory.xyz
-  energies.out
-  summary.out
-  input.yaml          # seed: 11
-SIM00001/
-  trajectory.xyz
-  energies.out
-  summary.out
-  input.yaml          # seed: 22
-SIM00002/
-  trajectory.xyz
-  energies.out
-  summary.out
-  input.yaml          # seed: 33
-```
-
-Restart files and variance tracking
----------------------------------
-
-Restart files
-: When a run finishes pymars saves the last state to a restart file so you can resume later. The restart filename is derived from the input geometry basename and is written next to the input YAML (for example, when your YAML is `examples/input.yaml` the restart file will be `examples/<base>.dyn.restart.npz`). numpy's `savez` is used, so the on-disk file ends with `.npz`.
-
-To resume a run set `calculation_parameters.restart_traj: true` in your YAML. pymars will look for `<base>.dyn.restart` and `<base>.dyn.restart.npz` next to the YAML and load positions/velocities/accelerations and the saved `step` if present.
-
-Variance tracking (model-provided)
-: If your FeNNol model exposes an ensemble variance per-frame named `etot_ensemble_var` pymars can record it in the energy output. Enable this with:
-
-```yaml
-output_details:
-  energies_file: "energies.out"
-  track_variance: true
-```
-
-When enabled, the energies file will include an additional column `Var(eV^2)` (the model-provided variance; units are left as eV^2). The variance value is written only in the energy output file (`energies.out`) and is **not** printed in the regular console summary to avoid spurious `None` values when the model does not provide variance.
-
-Notes:
-- If your model does not provide `etot_ensemble_var`, the `Var(eV^2)` column will contain `None` for that frame.
-- `track_variance` is meaningful only for single-trajectory runs (batch_size == 1). If `track_variance: true` and `batch_size > 1` pymars will disable the option and print a warning because the ensemble variance per-frame is not defined across parallel trajectories.
-
-
-
-
-API summary
-
-The signatures below match the current(1.7.5) implementation in the dev package and include the optional arguments exposed by the source docstrings.
-
-- `pymars.initial_configuration`
-  - `read_initial_configuration(filename)` — read and center an XYZ; returns `(species, coordinates)`.
-  - `sample_velocities(species, temperature, rng=None, dtype=None)` — Maxwell–Boltzmann velocities with optional RNG/dtype control.
-  - `remove_com_velocity(coordinates, velocities, species)` — remove COM translation and rigid-body rotation.
-  - `sample_projectiles(n_projectiles, temperature, distance, max_impact_parameter=0.5, projectile_species=18, rng=None, dtype=None)` — sample projectile positions and velocities for collision setups.
-
-- `pymars.rotation_utils`
-  - `apply_random_rotation(coords, n_rotations=None, rng=None)` — apply one or many random rotations.
-  - `uniform_orientation(n, indices=None, offset=0.5)` — generate a Fibonacci-lattice spherical sampling grid.
-  - `apply_fibonacci_random_rotation(coords, n=1000, n_rotations=None)` — generate a rotation from Fibonacci-sampled axes.
-  - `random_orientations(size, n=10000)` — sample random orientations from a uniform spherical grid.
-
-- `pymars.repulsion`
-  - `setup_repulsion_potential(target_species, projectile_species, use_jax=False)` — returns a function computing short-range repulsive energies and forces (ZBL-like).
-
-- `pymars.md`
-  - `initialize_collision_simulation(simulation_parameters, verbose=True)` — prepare all arrays and return a dict with keys including `integrate`, `coordinates`, `velocities`, `accelerations`, `species`, `masses`, `dt`, and batch metadata. The function supports both nested and legacy flat configuration layouts.
-
-- `pymars.utils`
-  - `us` — unit system (L=angstrom, T=ps, E=kcal/mol)
-  - `format_batch_conformations(species, coordinates, total_charge=0)` — pack batched coordinates into the FeNNol conformation dict format.
-  - `update_conformation(conformation, new_coordinates)` — replace coordinates in a packed conformation.
-  - `get_composition_string(species)` — build a composition string such as `O1_H2`.
-  - `write_xyz_frame(...)` — write a single XYZ frame, including optional charges and a custom comment line.
-
-Initial state saving and reproducibility
-------------------------------------------
-
-Initial conditions replay (batch → single trajectory)
-: When running batch simulations (`batch_size > 1`), pymars saves the exact initial conditions (positions, velocities, accelerations) for each trajectory:
-- **Single trajectory**: saved to `<xyzfilename>.dyn.init.npz` in the simulation folder
-- **Batch**: saved to `<xyzfilename>.batchdyn.init.npz` in the parent directory
-
-These files are controlled by the `save_initial` flag (default `true`). When set to `false`, no initial state files are written.
-
-To reproduce a single trajectory from a batch run:
-1. Locate the trajectory's `<xyzfilename>.dyn.init.npz` file in its `SIMXXXXX` folder
-2. Run with `batch_size: 1` and the per-trajectory seed; pymars will automatically load the saved initial state (when `restart_traj: false`)
-3. This ensures bit-identical initial conditions
-
-**Important note**: Floating-point arithmetic depends on batch shape (batch_size). Running a trajectory extracted from a batch with `batch_size: 1` will have slightly different numerical paths due to:
-- Different vectorization order in JAX/NumPy operations
-- Different floating-point reduction sequences
-
-For bit-wise reproducibility across trajectories and batches, use `save_initial: true` (default).
-
-Seeding and random number generation
-: pymars uses NumPy's modern Generator API (`np.random.default_rng(seed)`) with per-trajectory seeding:
-
-**Seed configuration**:
-- User provides one seed per trajectory via `general_parameters.seed`:
-  - Single scalar (for `batch_size: 1`) → used directly
-  - List/tuple/array → one seed per trajectory (must match batch_size)
-  - Comma-separated string (for batch runs) → split into per-trajectory seeds
-  - Missing/`null` → random unique seeds are generated per trajectory
-- For batch runs (`batch_size > 1`), all seeds must be **unique**; duplicates in user-provided lists trigger an error; duplicates in auto-generated lists are regenerated
-- Output logs print the resolved per-trajectory seed list for reference
-
-**How seeds are used**:
-Each trajectory gets its own NumPy Generator seeded with `seed_list[b]`. This RNG drives:
-- Random orientation sampling (via `scipy.spatial.transform.Rotation.random(..., random_state=rng_b)`)
-- Initial velocity sampling (Maxwell–Boltzmann via `rng_b.normal(...)`)
-- Projectile initial conditions sampling
-- Any other stochastic initialization
-
-Same seed → identical internal RNG state → **identical random sequences** (assuming same NumPy/SciPy versions and execution order).
-
-**NumPy Generator details**:
-Modern NumPy (`>= 1.17`) uses `Generator(PCG64)` by default:
-- `np.random.default_rng(seed)` creates a Generator with a PCG64 BitGenerator
-- The seed is used to initialize the BitGenerator's internal state
-- Each call to the RNG (e.g., `.normal()`, `.uniform()`) applies deterministic transformations to the internal state
-- Same seed → same state sequence → identical outputs
-
-
-**Reproducibility metadata**:
-At startup, pymars prints:
-- NumPy version and SciPy version
-- Hardware/platform info (OS, release, machine, processor)
-
-Recording these alongside your seed list ensures **full reproducibility** across machines and time:
-For example:
-
-```
-# Per-trajectory seeds:
-# trajectory         seed
-#          0    1234567890
-# NumPy version: 1.26.4
-# SciPy version: 1.11.4
-# Hardware: Linux 5.15.0-1234 x86_64 | processor=Intel(R) Core(TM) i7-11700K AT
-# Coordinate dtype: float32
-```
-
-**Note on reproducibility across batch sizes**: Different batch sizes lead to different JAX/NumPy vectorization paths and floating-point reduction orders, even with identical seeds. For guaranteed numerical reproducibility, use identical batch sizes, versions, and machine.
-
-Floating-point precision
-: By default, pymars uses single precision (float32) for coordinates, velocities, and rotations. Set `calculation_parameters.double_precision: true` to use float64:
-
-```yaml
-calculation_parameters:
-  double_precision: true  # Use float64 for coordinates and velocities
-```
-
-Masses and atomic species remain in float32 for efficiency. The flag is printed at runtime:
-```
-# Coordinate dtype: float64
-```
-
-**Note**: Double precision reduces but does not eliminate numerical divergence in chaotic dynamics (MD trajectories). For guaranteed reproducibility, use identical batch shapes and NumPy/SciPy versions.
-
-Program output:
+### Program output:
 the program implements internal logging to a file called <input structure filename>.out
 
-Notes on units
-- Lengths are in angstroms, time in picoseconds (ps), energies in kcal/mol — see `pymars.utils.us` for the unit system used across the code.
+### Notes on units
+- Lengths are in angstroms, time in picoseconds (ps), energies in kcal/mol — see `pymars.utils.us` for the unit system used across the code. Forces are in kcal/mol/angstroms.
 - default units in the configuration YAML are expected to be in the unit system (A, ps, kcal/mol); e.g., time step `dt: 0.001` corresponds to 1 fs. Input units can be specified explicitly in the YAML keys (e.g., `dt[fs]: 1.0`).
 
 Thermostat configuration
+
 - `thermostat_parameters.NO_thermostat: true` (default) — use NVE (microcanonical, energy-conserving) ensemble
 - The old name `NVE_thermostat` is still supported for backward compatibility but `NO_thermostat` is preferred
 
-Testing
+### Testing
 
 Run the unit tests with pytest:
 
@@ -704,12 +706,12 @@ The `tests/` directory contains simple, focused tests that also serve as usage e
 - `tests/aspirin.xyz` — small sample geometry used in the tests.
 - `tests/test_batch_sim_export.py` — regression test for batch SIM folder creation, artifact organization, per-trajectory seed rewriting, and initial state file handling (`<prefix>.dyn.init.npz`).
 
-Development & contributing
+### Development & contributing
 - Please open issues or pull requests for new features or bug fixes.
 - Add tests for new functionality and follow existing test patterns.
 
-Acknowledgements
+### Acknowledgements
 - This project uses FeNNol for model energies & forces and borrows unit conventions and utilities from that ecosystem.
 
-License
+### License
 - This project is licensed under the terms of the GNU LGPLv3 license. See [LICENSE](https://github.com/thomasple/pymars/blob/main/LICENSE) for additional details.
