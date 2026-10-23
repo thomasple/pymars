@@ -8,6 +8,24 @@ __all__ = ['us','format_batch_conformations','update_conformation','get_composit
 
 us = UnitSystem(L="angstrom",T="ps",E="kcalpermol")
 
+class _Tee:
+    """File-like object that writes to multiple streams at once.
+
+    Used to mirror stdout to both the terminal and an on-disk log file
+    (e.g. <prefix>.out), without requiring the user to redirect manually.
+    """
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+            s.flush()
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+            
 def format_batch_conformations(species,coordinates,total_charge=0):
     """Format batch conformations into a dictionary for FeNNol model processing.
 
@@ -85,4 +103,4 @@ def write_xyz_frame(f, symbols, coordinates, charges=None, **kwargs):
             f.write(
                 f"{symbols[i]:3} {coordinates[i,0]: 15.5e} {coordinates[i,1]: 15.5e} {coordinates[i,2]: 15.5e}\n"
             )
-    f.flush()
+    f.flush

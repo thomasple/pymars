@@ -1,12 +1,12 @@
 import argparse
 from datetime import timedelta
+import warnings
 import yaml
 import os
 import sys
 
 #import numpy as np
-from pymars.__init__ import _Tee
-
+from pymars.utils import us, _Tee
 from .utils import _format_runtime
 
 def main():
@@ -46,6 +46,23 @@ def main():
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
 
+    with open(args.input_file, "r") as f:
+        simulation_parameters = yaml.safe_load(f)
+    early_output_params = simulation_parameters.get("output_parameters", {})
+    verbose = bool(early_output_params.get("verbose", False))
+
+
+    def _vprint(*args, **kwargs):
+        if verbose:
+            print(*args, **kwargs)
+
+    if not verbose:
+        warnings.filterwarnings(
+        "ignore",
+        message="Log flushes by default now",
+        category=FutureWarning,
+    )
+
     # --- Set up internal logging to <prefix>.out as early as possible, so that
     # essentially all terminal output (starting with the very first print below)
     # is also captured to disk, without requiring the user to redirect manually.
@@ -70,7 +87,7 @@ def main():
     print("#  PhoBOOS: PhytHOn BOOSter for molecular geometry calculations #")
     print("#       A FENNIX-powered molecular geometry package             #")
     print("#################################################################")
-    print(f"# Writing output to: {log_file_path}")
+    _vprint(f"# Writing output to: {log_file_path}")
 
     # Print execution folder (working directory where the command is run, which may differ from installation path).
     print(f"# Running from folder: {os.getcwd()}")
@@ -96,7 +113,7 @@ def main():
    # Set the device
     if "MARS_DEVICE" in os.environ:
         device = os.environ["MARS_DEVICE"].lower()
-        print(f"# Setting device from env MARS_DEVICE={device}")
+        _vprint(f"# Setting device from env MARS_DEVICE={device}")
     else:
         # prefer calculation_parameters.device if present
         device = calc_params.get("device", simulation_parameters.get("device", "cpu")).lower()
@@ -117,8 +134,8 @@ def main():
         
         # Make ONLY this physical GPU visible to the entire process
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu_index
-        print(f"# Set CUDA_VISIBLE_DEVICES={gpu_index}")
-        
+        _vprint(f"# Set CUDA_VISIBLE_DEVICES={gpu_index}")
+    
         simulation_parameters["torch_device"] = "cuda:0"  # Always cuda:0 within visible set
         device = "gpu"
 
@@ -129,9 +146,11 @@ def main():
     # Configure JAX (always use first/only visible device)
     if device == "cpu":
         jax.config.update("jax_platforms", "cpu")
+        print("# Using CPU for computations.")
     elif device == "gpu":
         jax.config.update("jax_platforms", "")
         jax.config.update("jax_cuda_visible_devices", "0")  # First visible GPU
+        print(f"# Using GPU device: {gpu_index}")
 
     # Select the first device (should be the one exposed by CUDA_VISIBLE_DEVICES)
     try:
@@ -158,7 +177,7 @@ def main():
     if used_dev is None:
         # fallback to JAX's detected device
         used_dev = str(_device)
-    print(f"# Using device: {used_dev}")
+    _vprint(f"# Using device: {used_dev}")
 
     # Now it's safe to import fennol utilities and convert units because
     # JAX has been imported and configured with the intended device.
@@ -217,24 +236,28 @@ def main():
     #from here on, we can branch into the specific commands (opt or spt) and handle their respective parameters and execution.
 
     #for the singlepoint there are no additional parameters, so we can directly call the singlepoint function if the command is "spt"
-    if args.command == "spt":
+    if args.command == "spt": #Single-point energy calculation
         from .singlepoint import run_spt
         print("Performing single-point energy calculation...")
-        run_spt(initial_xyz, model_file=model_file, total_charge=total_charge)
+        run_spt(initial_xyz, model_file=model_file, total_charge=total_charge, verbose=verbose)
         print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
-    elif args.command == "freq":
+    elif args.command == "freq": #Vibrational frequency calculation
         from .singlepoint import run_spt
         print("Performing single-point energy calculation...")
-        run_spt(initial_xyz, model_file=model_file, total_charge=total_charge)
+        run_spt(initial_xyz, model_file=model_file, total_charge=total_charge, verbose=verbose)
         from .frequencies import run_freq
         print("Calculating vibrational frequencies...")
         run_freq(xyz_file=initial_xyz, model_file=model_file, total_charge=total_charge)
         print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
         
-    elif args.command == "opt":
+    elif args.command == "opt": #Geometry optimization (minimization of energy)
+        #Set up additional operations
+        spt_calc = simulation_parameters.get("output_parameters", {}).get("final_singlepoint", True)
+        freq_calc = simulation_parameters.get("output_parameters", {}).get("frequency_calculation", False)
+
         #for the optimization command, we need to handle additional parameters specific to optimization
         #double_precision = simulation_parameters.get("calculation_parameters", {}).get("double_precision", True)
         tolerance = float(simulation_parameters.get("optimization_parameters", {}).get("tolerance", 1e-2))
@@ -243,9 +266,10 @@ def main():
         dt_ps = dt_dyn * 1e-3  # convert fs to ps
         max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 10000)
         save_steps = simulation_parameters.get("optimization_parameters", {}).get("save_steps", -1)
+
         from .optiminimize import run_opt
         print("Performing geometry optimization...")
-        run_opt(xyz_file=initial_xyz,
+        opt_file, energy, _, _ = run_opt(xyz_file=initial_xyz,
             model_file=model_file,
             dt=dt_ps,
             total_charge=total_charge,
@@ -253,15 +277,26 @@ def main():
             max_steps=max_steps,
             keep_every=save_steps,
             dxmax=dx_max,
+            final_spt=spt_calc
             )
+
+        if freq_calc: #Vibrational frequency calculation at the final optimized geometry
+            from .frequencies import run_freq
+            print("Calculating vibrational frequencies...")
+            run_freq(xyz_file=opt_file, model_file=model_file, total_charge=total_charge)
 
         print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
-    elif args.command == "optts":
+    elif args.command == "optts": #Transition state optimization (saddle point)
+        #Set up additional operations
+        spt_calc = simulation_parameters.get("output_parameters", {}).get("final_singlepoint", True)
+        freq_calc = simulation_parameters.get("output_parameters", {}).get("frequency_calculation", True)
+
         #for the optimization command, we need to handle additional parameters specific to optimization
         fmax = simulation_parameters.get("optimization_parameters", {}).get("f_max", 0.2)
         max_steps = simulation_parameters.get("optimization_parameters", {}).get("max_steps", 1000)
+
         from .sella_ts import run_tsopt
         print("Initializing transition state optimization...")
         atoms, ts_file = run_tsopt(xyz_file=initial_xyz,
@@ -269,22 +304,32 @@ def main():
             log_file=log_file_path,
             total_charge=total_charge,
             fmax=fmax,
-            max_steps=max_steps,
+            max_steps=max_steps
             )
-        
-        from .singlepoint import run_spt
-        print("Performing single-point energy calculation...")
-        run_spt(ts_file, model_file=model_file, total_charge=total_charge)
-        from .frequencies import run_freq
-        print("Calculating vibrational frequencies...")
-        run_freq(xyz_file=ts_file, model_file=model_file, total_charge=total_charge)
-        print(f"Transition state optimization and frequency calculation completed. Final geometry saved to {ts_file}.")
-        print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
+
+        if spt_calc: #Single-point energy calculation at the final optimized transition state geometry
+            from .singlepoint import run_spt
+            print("Performing single-point energy calculation...")
+            run_spt(ts_file, model_file=model_file, total_charge=total_charge, verbose=verbose)
+            if not freq_calc:
+                print(f"Final energy has been calculated for the transition state.")
+        if freq_calc: #Vibrational frequency calculation at the final optimized transition state geometry
+            from .frequencies import run_freq
+            print("Calculating vibrational frequencies...")
+            run_freq(xyz_file=ts_file, model_file=model_file, total_charge=total_charge)
+            print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
+
+        _vprint(f"Transition state optimization completed. Final geometry saved to {ts_file}.")
+
         
         print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)
 
-    elif args.command == "tssrc":
+    elif args.command == "tssrc": #Transition state search (NEB) and optimization
+        #Set up additional operations
+        spt_calc = simulation_parameters.get("output_parameters", {}).get("final_singlepoint", True)
+        freq_calc = simulation_parameters.get("output_parameters", {}).get("frequency_calculation", True)
+
         #for the transition state search command, we need to handle additional parameters specific to transition state search
         src_fmax = simulation_parameters.get("search_parameters", {}).get("f_max", 0.3)
         max_search = simulation_parameters.get("search_parameters", {}).get("max_steps", 1000)
@@ -301,7 +346,6 @@ def main():
 
         #import the transition state search function and optimization function
         from .sella_ts import run_tssrc, run_tsopt
-
         if effort == "low":
             # single NEB, 12 images, faster but less accurate path
             ts_guess, ts_file, = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=12, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
@@ -313,12 +357,16 @@ def main():
         elif effort == "high":
             # first NEB, then refined around the barrier
             ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="tight")
+        elif type(effort) is int and effort > 0:
+            # user-defined number of images for NEB
+            print(f"Using user-defined effort level: {effort} images for NEB.")
+            ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=effort, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
         else:
             print(f"WARNING: Unknown effort level: {effort}. Next time, please choose from 'low', 'medium', or 'high'.") 
             print("Proceeding with default 'medium' effort level.")  
             ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
 
-        #print(f"#DEBUG:Transition state search completed. Transition state guess saved to {ts_file}.")
+        _vprint(f":Transition state search completed. Transition state guess saved to {ts_file}.")
 
         atoms, ts_optfile = run_tsopt(xyz_file=ts_file,
             model_file=model_file,
@@ -327,15 +375,19 @@ def main():
             fmax=opt_fmax,
             max_steps=max_opt
             )
-        print(f"Transition state optimization completed. Final geometry saved to {ts_optfile}.")
+        _vprint(f"Transition state optimization completed. Final geometry saved to {ts_optfile}.")
         
-        from .singlepoint import run_spt
-        print("Performing single-point energy calculation...")
-        run_spt(ts_file, model_file=model_file, total_charge=total_charge)
-        from .frequencies import run_freq
-        print("Calculating vibrational frequencies...")
-        run_freq(xyz_file=ts_file, model_file=model_file, total_charge=total_charge)
-        print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
+        if spt_calc:#Single-point energy calculation at the final optimized transition state geometry
+            from .singlepoint import run_spt
+            print("Performing single-point energy calculation...")
+            run_spt(ts_optfile, model_file=model_file, total_charge=total_charge, verbose=verbose)
+            if not freq_calc:
+                print(f"Final energy has been calculated for the transition state.")
+        if freq_calc:#Vibrational frequency calculation at the final optimized transition state geometry
+            from .frequencies import run_freq
+            print("Calculating vibrational frequencies...")
+            run_freq(xyz_file=ts_optfile, model_file=model_file, total_charge=total_charge)
+            print(f"Final energy and vibrational frequencies have been calculated for the transition state.")
         
         print(f"\nPhoBOOS terminated normally after {_format_runtime(__import__('time').perf_counter() - start_time)}.")
         sys.exit(0)

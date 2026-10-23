@@ -1,4 +1,4 @@
-# PhoBOOS Singlepoint/Frequencies Energy Configuration Input File
+# PhoBOOS Singlepoint/Frequencies Energy Configuration Input File (v.1.7.6)
 
 calculation_parameters:
   device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
@@ -7,3 +7,6 @@ calculation_parameters:
 input_parameters:
   initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
   total_charge: 0                        # Total molecular charge
+
+output_parameters:
+  verbose: false  # If true, prints extra run information

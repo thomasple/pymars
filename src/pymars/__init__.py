@@ -13,26 +13,8 @@ try:
 except PackageNotFoundError:
     __version__ = "unknown"
 
+from .utils import _Tee
 __all__ = []
-
-
-class _Tee:
-    """File-like object that writes to multiple streams at once.
-
-    Used to mirror stdout to both the terminal and an on-disk log file
-    (e.g. <prefix>.out), without requiring the user to redirect manually.
-    """
-    def __init__(self, *streams):
-        self._streams = streams
-
-    def write(self, data):
-        for s in self._streams:
-            s.write(data)
-            s.flush()
-
-    def flush(self):
-        for s in self._streams:
-            s.flush()
 
 
 def _next_indexed_path(path):
@@ -174,11 +156,11 @@ def main() -> None:
         simulation_parameters = yaml.safe_load(f)
     early_output_params = simulation_parameters.get("output_details", {})
     verbose = bool(early_output_params.get("verbose", False))
-
+    
     def _vprint(*args, **kwargs):
         if verbose:
             print(*args, **kwargs)
-
+    
     # --- Set up internal logging to <prefix>.out as early as possible, so that
     # essentially all terminal output (starting with the very first print below)
     # is also captured to disk, without requiring the user to redirect manually.
