@@ -175,6 +175,14 @@ Geometry and system information shared by all PhoBOOS commands.
 - `final_geometry`: Path to the target XYZ geometry for `tssrc`. Required only for `tssrc`.
 - `total_charge`: Total molecular charge. Default: `0`.
 
+### `output_parameters`
+
+Runtime-output flags used by the PhoBOOS CLI.
+
+- `verbose`: Enable extra diagnostic output. The CLI reads this from `output_parameters.verbose`.
+- `final_singlepoint`: Run a final single-point energy printout after optimization/TS workflows. Default: `true` for `opt`, `optts`, and `tssrc`.
+- `frequency_calculation`: Run vibrational analysis after the final geometry. Default: `false` for `opt`; default: `true` for `optts` and `tssrc`.
+
 ### `optimization_parameters`
 
 Used by `opt`, `optts`, and `tssrc`.
@@ -190,7 +198,7 @@ Used by `opt`, `optts`, and `tssrc`.
 
 Used by `tssrc`.
 
-- `effort`: Transition-state search level. Supported values are `low`, `medium`, and `high`.
+- `effort`: Transition-state search level. Supported values are `low`, `medium`, and `high`. The implementation also accepts a positive integer value as a custom NEB image count (for example, `effort: 16`).
 - `f_max`: Force threshold for the NEB search stage. The example input sets this to `0.3`.
 - `max_steps`: Maximum number of NEB search steps. The example input sets this to `1000`.
 
@@ -256,6 +264,7 @@ What it does:
 - Runs an iterative geometry optimization using the FIRE algorithm.
 - Writes an optimization trajectory when `save_steps > 0`.
 - Stops at convergence (`tolerance`) or when `max_steps` is reached.
+- By default performs a final single-point energy evaluation; `output_parameters.final_singlepoint` toggles that behavior and `output_parameters.frequency_calculation` can trigger a post-optimization vibrational analysis.
 
 Implementation notes:
 - The actual optimizer is the FENNOL helper `optimize_fire2`, not a custom minimizer implemented in pymars.
@@ -294,6 +303,7 @@ What it does:
 - Starts from a guess geometry and optimizes it as a first-order saddle point.
 - Uses ASE/Sella rather than a minimum-energy optimizer.
 - Writes the optimized TS guess to a `.tsopt.xyz` file and then evaluates its energy and vibrational spectrum.
+- Defaults to running both a final single-point energy check and a vibrational spectrum, unless `output_parameters.final_singlepoint` or `output_parameters.frequency_calculation` are overridden.
 
 Implementation details:
 - The solver is `Sella(atoms, order=1, trajectory=..., logfile=...)`.
@@ -316,6 +326,7 @@ What it does:
 - Runs a loose NEB relaxation, identifies the highest-energy image, and then performs a climbing-image refinement.
 - For `effort=high`, the path is refined around the barrier with a zoomed refinement stage.
 - Transfers the resulting TS guess to a Sella optimization for final saddle-point convergence.
+- Defaults to a final single-point energy check and vibrational analysis after the final TS geometry is found, unless those are disabled via `output_parameters`.
 
 Implementation details:
 - `run_tssrc` creates a list of image structures and attaches a `FENNIXCalculator` to each image.
@@ -374,9 +385,11 @@ The `effort` setting controls the search strategy:
 - `low`: 12 images, loose CI-NEB search.
 - `medium`: 20 images, loose CI-NEB search.
 - `high`: 20 images plus a zoom refinement around the peak image before handing the best candidate to the final TS optimizer.
+- A positive integer is also accepted as a direct image-count override. The CLI treats it as `n_images=effort` and runs the loose NEB pass with that many images.
 
 After the NEB search, the code passes the saddle guess into Sella (`order=1`) for a final transition-state optimization. This is the same RS-PRFO-style optimization used by `phoboos optts` and is intended to converge the approximate NEB image into a true first-order saddle point.
 
+# Pymars 
 Python API examples:
 
 Read an initial configuration and inspect shapes (example taken from the tests):
@@ -552,7 +565,7 @@ Notes:
 - `track_variance` is meaningful only for single-trajectory runs (batch_size == 1). If `track_variance: true` and `batch_size > 1` pymars will disable the option and print a warning because the ensemble variance per-frame is not defined across parallel trajectories.
 
 
-```
+
 
 API summary
 
@@ -632,7 +645,6 @@ Modern NumPy (`>= 1.17`) uses `Generator(PCG64)` by default:
 - Each call to the RNG (e.g., `.normal()`, `.uniform()`) applies deterministic transformations to the internal state
 - Same seed → same state sequence → identical outputs
 
-**Important**: The old global seed API (`np.random.seed(...)`) is not used; all randomness is seeded per-trajectory via independent Generator instances.
 
 **Reproducibility metadata**:
 At startup, pymars prints:
@@ -640,6 +652,7 @@ At startup, pymars prints:
 - Hardware/platform info (OS, release, machine, processor)
 
 Recording these alongside your seed list ensures **full reproducibility** across machines and time:
+For example:
 
 ```
 # Per-trajectory seeds:
@@ -651,7 +664,7 @@ Recording these alongside your seed list ensures **full reproducibility** across
 # Coordinate dtype: float32
 ```
 
-**Note on reproducibility across batch sizes**: Different batch sizes lead to different JAX/NumPy vectorization paths and floating-point reduction orders, even with identical seeds. For guaranteed numerical reproducibility, use identical batch sizes and versions.
+**Note on reproducibility across batch sizes**: Different batch sizes lead to different JAX/NumPy vectorization paths and floating-point reduction orders, even with identical seeds. For guaranteed numerical reproducibility, use identical batch sizes, versions, and machine.
 
 Floating-point precision
 : By default, pymars uses single precision (float32) for coordinates, velocities, and rotations. Set `calculation_parameters.double_precision: true` to use float64:
