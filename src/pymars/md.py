@@ -520,7 +520,7 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
                 pot_e   = float(potential_energies_np.flat[b])
                 kin_e   = float(kinetic_energies_np.flat[b])
                 temp    = float(temperatures_np.flat[b])
-                
+
                 # Format time with appropriate precision
                 time_str = time_format.format(time_fs)
                 # Build output line: step | time | etot | epot | ekin | temp
