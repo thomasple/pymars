@@ -1,0 +1,26 @@
+# PhoBOOS Transition State Search Configuration Input File (v.1.7.6)
+
+calculation_parameters:
+  device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
+  model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
+
+input_parameters:
+  initial_geometry: "tests/reactant.xyz"  # Path to initial XYZ geometry
+  final_geometry: "tests/product.xyz"     # Path to final XYZ geometry
+  total_charge: 0                         # Total molecular charge
+
+optimization_parameters:
+  f_max: 0.2        # fmax in eV/Angstrom   Default: 0.2
+  max_steps: 1000   # Maximum number of optimization steps. Default: 1000
+
+#Note: the following "effort" parameter is used to control the number of images in the NEB calculation.
+#Low effort: 12 images, medium effort:20 images, high effort 20 images + refinement around the peak. The user can also specify a custom number(int) of images.
+search_parameters:
+  effort: "medium"  # Options: 'low', 'medium', 'high'. Default: 'medium'
+  f_max: 0.3        # fmax in eV/Angstrom. NEB-CI step will have a fmax of f_max/2, while this is the fmax for the first search step. Default: 0.3
+  max_steps: 1000   # Maximum number of search steps for transition state search. Default: 1000
+
+output_parameters:
+  verbose: false  # If true, prints extra run information
+  final_singlepoint: true  # If true, performs a final singlepoint calculation at the transition state geometry
+  frequency_calculation : true  # If true, calculates vibrational frequencies at the transition state. Default: true

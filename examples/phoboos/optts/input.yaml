@@ -1,0 +1,18 @@
+# PhoBOOS Transition State Optimization Configuration Input File (v.1.7.6)
+
+calculation_parameters:
+  device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
+  model: "/path/to/fennix/model.fnx"  # Path to FENNIX model file
+
+input_parameters:
+  initial_geometry: "tests/aspirin.xyz"  # Path to initial XYZ geometry
+  total_charge: 0                        # Total molecular charge
+
+optimization_parameters:
+  f_max: 0.2        # fmax in eV/Angstrom   Default: 0.2 
+  max_steps: 1000   # Maximum number of optimization steps
+
+output_parameters:
+  verbose: false  # If true, prints extra run information
+  final_singlepoint: true  # If true, performs a final singlepoint calculation at the transition state geometry
+  frequency_calculation : true  # If true, calculates vibrational frequencies at the transition state. Default: true

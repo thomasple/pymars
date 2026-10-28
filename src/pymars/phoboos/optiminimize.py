@@ -12,7 +12,7 @@ from fennol.md.utils import optimize_fire2
 from pymars.utils import write_xyz_frame, format_batch_conformations, us
 
 def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
-            total_charge=0, tolerance=1e-2, max_steps=10000, keep_every=-1, dxmax=0.2):
+            total_charge=0, tolerance=1e-2, max_steps=10000, keep_every=-1, dxmax=0.2, final_spt=True):
     "Minimize the energy of a molecular geometry using a FENNIX model"
 
     # read the coordinates from the xyz file
@@ -123,20 +123,23 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
     energy, forces, partial_charges = total_energies_and_forces(coordinates_jnp, conformation)
     print("\n")
     print("#######################################################")
-    print(f"Final singlepoint energy: {(energy[0]):.6f} kcal/mol")
-    print("\n")
-    print(f"Forces on atoms (kcal/mol/Angstrom):")
-    print(f"Index\tAtom\tFx\t\tFy\t\tFz")
-    for i, (s, f) in enumerate(zip(symbols, forces[0])):
-        print(f"{i+1}\t{s}\t{f[0]:.6f}\t{f[1]:.6f}\t{f[2]:.6f}")
-    print("\n")
-    if partial_charges is not None:
-        print("Mulliken partial charges:")
-        print(f"Index\tAtom\tCharge")
-        for i, (s, q) in enumerate(zip(symbols, partial_charges[0])):
-            print(f"{i+1}\t{s}\t{q:.6f}")
+    if not final_spt:
+        print(f"Final energy: {(energy[0]):.6f} kcal/mol")
     else:
-        print("No partial charges were computed by the model.")
+        print(f"Final single-point energy: {(energy[0]):.6f} kcal/mol")
+        print("\n")
+        print(f"Forces on atoms (kcal/mol/Angstrom):")
+        print(f"Index\tAtom\tFx\t\tFy\t\tFz")
+        for i, (s, f) in enumerate(zip(symbols, forces[0])):
+            print(f"{i+1}\t{s}\t{f[0]:.6f}\t{f[1]:.6f}\t{f[2]:.6f}")
+        print("\n")
+        if partial_charges is not None:
+            print("Mulliken partial charges:")
+            print(f"Index\tAtom\tCharge")
+            for i, (s, q) in enumerate(zip(symbols, partial_charges[0])):
+                print(f"{i+1}\t{s}\t{q:.6f}")
+        else:
+            print("No partial charges were computed by the model.")
 
     # write the output
     output_file = outfile if outfile else xyz_filepath.with_suffix(".opt.xyz")
@@ -155,3 +158,7 @@ def run_opt(xyz_file, model_file, outfile=None, dt=0.002,
     print("  Geometry optimization completed successfully!")
     print("#######################################################")
 
+    if final_spt:
+        return output_file, energy[0], forces[0], partial_charges[0] if partial_charges is not None else None
+    else:
+        return output_file, energy[0], None, None

@@ -8,8 +8,13 @@ from pymars.utils import format_batch_conformations, us
 
 from pymars.phoboos.utils import read_xyz_file
 
-def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
+def run_spt(xyz_file, model_file, outfile=None, total_charge=0,verbose=False):
     "Calculate the energy of a molecular geometry using a FENNIX model"
+
+    def _vprint(*args, **kwargs):
+        if verbose:
+            print(*args, **kwargs)
+
     # read the coordinates from the xyz file
     print(f"Reading coordinates from: {xyz_file}")
     symbols, coordinates, = read_xyz_file(xyz_file)
@@ -22,6 +27,7 @@ def run_spt(xyz_file, model_file, outfile=None, total_charge=0):
     assert model_file.exists(), f"Model file {model_file} does not exist"
     model = FENNIX.load(model_file, use_atom_padding=False)
     model.preproc_state = model.preproc_state.copy({"check_input": False})
+    _vprint(f"Model's internal energy unit: {model.energy_unit}, conversion factor to kcal/mol: {1.0 / us.get_multiplier(model.energy_unit):.6f}.")
     # Energy unit conversion: model outputs in its native units, convert to kcal/mol
     energy_conv = 1.0 / us.get_multiplier(model.energy_unit)
 

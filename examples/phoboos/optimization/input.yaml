@@ -1,4 +1,4 @@
-# PhoBOOS Optimization Configuration Input File
+# PhoBOOS Optimization Configuration Input File (v.1.7.6)
 
 calculation_parameters:
   device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu
@@ -14,3 +14,8 @@ optimization_parameters:
   dt_dyn: 2.0        # Timestep in femtoseconds (fs)
   max_steps: 10000   # Maximum number of optimization steps
   save_steps: -1    # Save trajectory frames every N steps; select -1 to save only the final optimized geometry
+
+output_parameters:
+  verbose: false  # If true, prints extra run information
+  final_singlepoint: true  # If true, performs a final singlepoint calculation at the transition state geometry
+  frequency_calculation : false  # If true, calculates vibrational frequencies. Default: false
