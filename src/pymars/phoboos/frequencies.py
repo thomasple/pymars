@@ -4,6 +4,7 @@ from pathlib import Path
 from ase.atoms import Atoms
 from ase.io import read
 from ase.vibrations import Vibrations
+from ase.units import Bohr
 
 from fennol.ase import FENNIXCalculator
 from fennol.models import FENNIX
@@ -64,10 +65,82 @@ def _format_frequency(freq):
         return real_part if abs(real_part) >= abs(imag_part) else -abs(imag_part)
     return float(freq)
 
+def _format_frequency2(freq):
+    """Format an ASE frequency in cm^-1 for Molden output.
+
+    Imaginary frequencies are represented as negative real values.
+    """
+    freq = complex(freq)
+    real_part = freq.real
+    imag_part = freq.imag
+
+    if np.isclose(imag_part, 0.0):
+        return real_part
+
+    if np.isclose(real_part, 0.0):
+        return -abs(imag_part)
+
+    raise ValueError(
+        f"Unexpected complex frequency with significant real and "
+        f"imaginary parts: {freq}"
+    )
+
+def write_molden_freq(filename, atoms, freqs, modes):
+    """Write a Molden file with frequencies in cm^-1.
+
+    Imaginary frequencies are written as negative real values.
+    Modes must have shape (nmodes, natoms, 3).
+    """
+    import numpy as np
+    from ase.units import Bohr
+
+    sym = atoms.get_chemical_symbols()
+    Z = atoms.get_atomic_numbers()
+    pos = atoms.get_positions()
+
+    freqs = np.asarray(freqs)
+    modes = np.asarray(modes)
+
+    if len(freqs) != len(modes):
+        raise ValueError(
+            f"Number of frequencies ({len(freqs)}) does not match "
+            f"number of modes ({len(modes)})."
+        )
+
+    if modes.shape != (len(freqs), len(atoms), 3):
+        raise ValueError(
+            f"Unexpected modes shape {modes.shape}; expected "
+            f"({len(freqs)}, {len(atoms)}, 3)."
+        )
+
+    with open(filename, "w") as f:
+        f.write("[Molden Format]\n")
+        f.write("[Title]\nPhoBOOS vibrational analysis\n")
+
+        f.write("[Atoms] Angs\n")
+        for i, (s, z, (x, y, zc)) in enumerate(zip(sym, Z, pos), 1):
+            f.write(
+                f"{s:2s} {i:5d} {z:3d} "
+                f"{x:14.8f} {y:14.8f} {zc:14.8f}\n"
+            )
+
+        f.write("[FREQ]\n")
+        for freq in freqs:
+            f.write(f"{_format_frequency2(freq):14.4f}\n")
+
+        f.write("[FR-COORD]\n")
+        for s, (x, y, zc) in zip(sym, pos / Bohr):
+            f.write(f"{s:2s} {x:14.8f} {y:14.8f} {zc:14.8f}\n")
+
+        f.write("[FR-NORM-COORD]\n")
+        for i, mode in enumerate(modes, 1):
+            f.write(f"vibration {i}\n")
+            for dx, dy, dz in mode:
+                f.write(f"{dx:14.8f} {dy:14.8f} {dz:14.8f}\n")
 
 def _format_report(atoms, vib, energy_conv):
     "Format the vibrational analysis report for output."
-    freqs = np.asarray([_format_frequency(freq) for freq in vib.get_frequencies()], dtype=float)
+    freqs = np.asarray([_format_frequency2(freq) for freq in vib.get_frequencies()], dtype=float)
     energies = np.asarray(vib.get_energies(), dtype=float)
     energies_kcalmol = energies * energy_conv
     masses = np.asarray(atoms.get_masses(), dtype=float)
@@ -85,9 +158,17 @@ def _format_report(atoms, vib, energy_conv):
         force_constants.append(_force_constant_from_frequency(freq, reduced_mass))
 
     lines = []
-    lines.append("")
-    lines.append(" Harmonic vibrational analysis")
-    lines.append("")
+    lines.append("\n Vibrational mode energies")
+    lines.append("  Mode       eV           kcal/mol")
+    for index, (energy_ev, energy_kcalmol) in enumerate(zip(energies, energies_kcalmol), start=1):
+        lines.append(f"{index:6d}{energy_ev:13.6f}{energy_kcalmol:15.6f}")
+
+    lines.append("\n Vibrational frequencies:")
+    for index, freq in enumerate(freqs, start=1):
+        lines.append(f"{index:6d}: {freq:12.4f} cm^-1")
+    
+    lines.append("\n Harmonic vibrational analysis\n")
+
 
     for start in range(0, len(freqs), 3):
         block = list(range(start, min(start + 3, len(freqs))))
@@ -107,16 +188,6 @@ def _format_report(atoms, vib, energy_conv):
                 row += f"{x:9.2f}{y:7.2f}{z:7.2f}"
             lines.append(row)
         lines.append("")
-
-    lines.append(" Vibrational mode energies")
-    lines.append("  Mode       eV           kcal/mol")
-    for index, (energy_ev, energy_kcalmol) in enumerate(zip(energies, energies_kcalmol), start=1):
-        lines.append(f"{index:6d}{energy_ev:13.6f}{energy_kcalmol:15.6f}")
-
-    lines.append("")
-    lines.append(" Vibrational frequencies:")
-    for index, freq in enumerate(freqs, start=1):
-        lines.append(f"{index:6d}: {freq:12.4f} cm^-1")
 
     return "\n".join(lines)
 
@@ -168,7 +239,10 @@ def run_freq(xyz_file, model_file, outfile=None, total_charge=0):
     vib = Vibrations(atoms)
     vib.run()
     report = _format_report(atoms, vib, energy_conv)
-
+    base = Path(xyz_file).stem
+    molden_path = Path(Path(xyz_file).parent, f"{base}.molden")
+    print(f"#DEBUG: filename: molden_path = {molden_path}")
+    write_molden_freq(molden_path, atoms, vib.get_frequencies(), [vib.get_mode(i) for i in range(len(vib.get_frequencies()))])
     vib.clean()
     print(report)
     if outfile is not None:
