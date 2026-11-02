@@ -1,4 +1,4 @@
-# PhoBOOS Transition State Search Configuration Input File (v.1.7.6)
+# PhoBOOS Transition State Search Configuration Input File (v.1.7)
 
 calculation_parameters:
   device: cpu                         # Options: 'cpu', 'cuda:0', 'gpu:0', etc. Default: cpu

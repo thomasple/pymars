@@ -203,7 +203,7 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
             role = "climbing image"
         else:
             role = ""
-    print(f"{i:>6} {e:>14.6f}    {role}")
+        print(f"{i:>6} {e:>14.6f}    {role}")
 
     print(f"Highest energy image: index {peak_index}, "
       f"energy {energies[peak_index]:.6f} eV, "
@@ -240,7 +240,7 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
                 role = "climbing image"
             else:
                 role = ""
-        print(f"{i:>6} {e:>14.6f}    {role}")
+            print(f"{i:>6} {e:>14.6f}    {role}")
 
         print(f"Highest energy image: index {peak2}, "
         f"energy {energies2[peak2]:.6f} eV, "

@@ -218,7 +218,10 @@ def initialize_collision_simulation(simulation_parameters, verbose=True):
     
     model_path = Path(model_file)
     assert model_path.is_file(), f"Model file {model_file} does not exist."
-    print(f"# Using FENNIX model from file: {model_file}")
+    if verbose:
+        print(f"# Using FENNIX model from path: {model_file}")
+    else:
+        print(f"# Using FENNIX model {os.path.basename(model_file)}")
     
     # Load FeNNol model (FENNOL_MODULES_PATH already set in __init__.py)
     # Model provides energy and forces via JAX-compatible functions

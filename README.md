@@ -21,6 +21,17 @@ See `installation_guide.txt` for a step-by-step installation and troubleshooting
 
 Quickstart (CLI)
 
+The repository includes ready-to-run example inputs and sample molecules under `examples/`.
+
+- PyMARS examples: `examples/pymars/input.yaml` and the sample geometry files in `examples/pymars/`
+- PhoBOOS examples: `examples/phoboos/singlepoint-freq/input.yaml`, `examples/phoboos/optimization/input.yaml`, `examples/phoboos/optts/input.yaml`, and `examples/phoboos/tssearch/input.yaml`
+
+Included molecule examples:
+- `examples/pymars/MethylguanineH.xyz`
+- `examples/pymars/testosteroneH.xyz`
+- `tests/aspirin.xyz` and other test geometries used in the automated regression checks
+(those marked with H or Pr are protonated)
+
 Prepare a YAML configuration (example `input.yaml`):
 
 ```yaml
@@ -80,10 +91,19 @@ output_details:
 Run the simulation using the provided CLI entry point:
 
 ```bash
-pymars input.yaml
+pymars examples/pymars/input.yaml
 ```
 
-This will run a collision simulation and write a trajectory file (default `trajectory.xyz`).
+This will run a collision simulation and write a trajectory file (default `trajectory.xyz`) in the current working directory.
+
+For the geometry-focused tooling:
+
+```bash
+phoboos spt examples/phoboos/singlepoint-freq/input.yaml
+phoboos opt examples/phoboos/optimization/input.yaml
+phoboos optts examples/phoboos/optts/input.yaml
+phoboos tssrc examples/phoboos/tssearch/input.yaml
+```
 
 Recent changes (1.7.X)
 -----------------------------------
@@ -323,7 +343,7 @@ Notes:
 
 API summary
 
-The signatures below match the current(1.7.5) implementation in the dev package and include the optional arguments exposed by the source docstrings.
+The signatures below reflect the current development implementation and the functions that are exposed in the active source tree.
 
 - `pymars.initial_configuration`
   - `read_initial_configuration(filename)` — read and center an XYZ; returns `(species, coordinates)`.
@@ -441,8 +461,18 @@ Masses and atomic species remain in float32 for efficiency. The flag is printed 
 --------------------------
 
 `phoboos` is the geometry-focused companion CLI (entry point: `phoboos = pymars.phoboos:main`).
-It reads an input YAML and runs either single-point energy evaluation or geometry optimization
-using a FeNNIX model.
+It reads an input YAML and runs single-point energy evaluation, vibrational analysis, or geometry optimization
+using a FeNNol/FENNIX model.
+
+The command interface is a subcommand-based CLI:
+
+```bash
+phoboos spt <input.yaml>
+phoboos freq <input.yaml>
+phoboos opt <input.yaml>
+phoboos optts <input.yaml>
+phoboos tssrc <input.yaml>
+```
 
 PhoBOOS input file structure
 ----------------------------
@@ -500,7 +530,7 @@ Used by `tssrc`.
 Single-point calculation:
 
 ```bash
-phoboos spt examples/phoboos_spt/input.yaml
+phoboos spt examples/phoboos/singlepoint-freq/input.yaml
 ```
 
 What it does:
@@ -520,7 +550,7 @@ Input parameters used by `phoboos spt`:
 Single-point energy plus harmonic vibrational analysis:
 
 ```bash
-phoboos freq examples/phoboos_spt/input.yaml
+phoboos freq examples/phoboos/singlepoint-freq/input.yaml
 ```
 
 What it does:
@@ -547,7 +577,7 @@ Input parameters used are the same as `phoboos spt`:
 Geometry optimization (iterative structure update):
 
 ```bash
-phoboos opt examples/phoboos_opt/input.yaml
+phoboos opt examples/phoboos/optimization/input.yaml
 ```
 
 What it does:
@@ -587,7 +617,7 @@ Optimization parameters used by `phoboos opt`:
 Transition-state optimization (Sella / RS-PRFO):
 
 ```bash
-phoboos optts examples/phoboos_spt/input.yaml
+phoboos optts examples/phoboos/optts/input.yaml
 ```
 
 What it does:
@@ -607,7 +637,7 @@ Implementation details:
 Transition-state search using NEB, then TS refinement:
 
 ```bash
-phoboos tssrc examples/phoboos_spt/input.yaml
+phoboos tssrc examples/phoboos/tssearch/input.yaml
 ```
 
 What it does:
