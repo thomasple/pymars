@@ -91,6 +91,58 @@ def _install_fake_runtime_modules(monkeypatch):
     monkeypatch.setitem(sys.modules, "ase.data", ase_data_mod)
 
 
+def test_preflight_archives_traj_and_selected_outs(tmp_path, monkeypatch):
+    """Old trajectory outputs should be packed into a SIM folder before a new run."""
+
+    _ensure_local_src_on_syspath()
+    _install_fake_runtime_modules(monkeypatch)
+
+    import pymars
+
+    input_yaml = tmp_path / "input.yaml"
+    input_yaml.write_text(
+        "\n".join(
+            [
+                "general_parameters:",
+                "  batch_size: 1",
+                "  seed: 123",
+                "input_parameters:",
+                "  initial_geometry: geom.xyz",
+                "dynamic_parameters:",
+                "  dt_dyn: 1.0",
+                "  step_dyn: 1",
+                "output_details:",
+                "  trajectory_file: trajectory.xyz",
+                "  energies_file: energies.out",
+                "  summary_file: summary.out",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    geom = tmp_path / "geom.xyz"
+    geom.write_text("2\ncomment\nH 0.0 0.0 0.0\nH 0.7 0.0 0.0\n", encoding="utf-8")
+
+    stale_traj = tmp_path / "trajectory.xyz"
+    stale_traj.write_text("old trajectory\n", encoding="utf-8")
+    stale_energy = tmp_path / "energies.out"
+    stale_energy.write_text("old energy\n", encoding="utf-8")
+    stale_summary = tmp_path / "summary.out"
+    stale_summary.write_text("old summary\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+
+    pymars._archive_previous_batch_outputs(str(input_yaml), tmp_path)
+
+    assert not stale_traj.exists()
+    assert (tmp_path / "SIM00000").is_dir()
+    assert (tmp_path / "SIM00000" / "trajectory.xyz").is_file()
+    assert (tmp_path / "SIM00000" / "energies.out").is_file()
+    assert (tmp_path / "SIM00000" / "summary.out").is_file()
+    assert geom.exists()
+
+
 def test_batch_sim_export_moves_outputs_and_rewrites_seed(tmp_path, monkeypatch):
     """Regression test for SIMXXXXX export: folders, moved files, and seed rewriting."""
 

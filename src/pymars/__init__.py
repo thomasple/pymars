@@ -1,4 +1,5 @@
 import argparse
+import glob
 import yaml
 import numpy as np
 import os
@@ -62,6 +63,166 @@ def _next_indexed_path(path):
     # Indexed variants already exist: new run claims the next free index.
     next_index = max(existing_indices) + 1
     return os.path.join(directory, f"{base_root}_{next_index}{ext}")
+
+
+def _pick_last_created_candidate(candidates, base_name):
+    """Pick the newest relevant file for a configured output basename.
+
+    Rule: if a plain file exists, keep it; otherwise choose the highest indexed
+    variant. This matches the policy of preferring the most recent output while
+    still preserving the base name for the next run.
+    """
+    if not candidates:
+        return None
+
+    plain = [p for p in candidates if os.path.basename(p) == base_name]
+    if plain:
+        return plain[-1]
+
+    indexed = []
+    root, ext = os.path.splitext(base_name)
+    pattern = re.compile(rf"^{re.escape(root)}_(\d+){re.escape(ext)}$")
+    for p in candidates:
+        name = os.path.basename(p)
+        m = pattern.match(name)
+        if m:
+            indexed.append((int(m.group(1)), p))
+
+    if indexed:
+        return max(indexed, key=lambda item: item[0])[1]
+
+    return candidates[-1]
+
+
+def _archive_previous_batch_outputs(input_file, cwd=None, simulation_parameters=None):
+    """Archive stale run artifacts before a new batch writes to the working directory.
+
+    The intended policy is:
+      - any stale trajectory file in the CWD is moved into the next SIMxxxxx folder;
+      - non-traj XYZ files are copied rather than moved (typically the starting geometry);
+      - configured .out files are copied into the archive folder, while keeping the
+        root file in place for the incoming run to overwrite/append as needed;
+      - if a trajectory file is present but no matching output file is found for the
+        configured outputs, raise an error.
+    """
+    cwd = cwd or os.getcwd()
+    if simulation_parameters is None:
+        with open(input_file, "r", encoding="utf-8") as handle:
+            simulation_parameters = yaml.safe_load(handle) or {}
+
+    output_details = simulation_parameters.get("output_details", {}) or {}
+    if not isinstance(output_details, dict):
+        output_details = {}
+
+    def _configured_out_paths():
+        names = []
+        for key in ("energies_file", "summary_file"):
+            value = output_details.get(key)
+            if value:
+                names.append(str(value))
+        return names
+
+    def _matches_output_pattern(path, base_name):
+        root, ext = os.path.splitext(os.path.basename(base_name))
+        if os.path.basename(path) == os.path.basename(base_name):
+            return True
+        pattern = re.compile(rf"^{re.escape(root)}_(\d+){re.escape(ext)}$")
+        return bool(pattern.match(os.path.basename(path)))
+
+    def _list_matching_files(pattern_name):
+        if pattern_name is None:
+            return []
+        base_name = os.path.basename(str(pattern_name))
+        matches = []
+        for name in os.listdir(cwd):
+            if _matches_output_pattern(name, base_name):
+                full = os.path.join(cwd, name)
+                if os.path.isfile(full):
+                    matches.append(full)
+        return matches
+
+    def _next_sim_dir():
+        existing = []
+        for name in os.listdir(cwd):
+            m = re.fullmatch(r"SIM(\d{5})", name)
+            if m and os.path.isdir(os.path.join(cwd, name)):
+                existing.append(int(m.group(1)))
+        start = (max(existing) + 1) if existing else 0
+        return os.path.join(cwd, f"SIM{start:05d}")
+
+    trajectory_name = output_details.get("trajectory_file")
+    trajectory_exists = False
+    traj_candidates = []
+    if trajectory_name and str(trajectory_name).lower() != "none":
+        traj_base = os.path.basename(str(trajectory_name))
+        traj_pattern = re.compile(rf"^{re.escape(os.path.splitext(traj_base)[0])}(?:_\d+)?{re.escape(os.path.splitext(traj_base)[1])}$")
+        for name in os.listdir(cwd):
+            if traj_pattern.match(name) and os.path.isfile(os.path.join(cwd, name)):
+                traj_candidates.append(os.path.join(cwd, name))
+        trajectory_exists = bool(traj_candidates)
+
+    output_names = _configured_out_paths()
+    selected_outs = []
+    for name in output_names:
+        matches = _list_matching_files(name)
+        if matches:
+            selected = _pick_last_created_candidate(matches, os.path.basename(name))
+            if selected is not None:
+                selected_outs.append(selected)
+
+    if trajectory_exists and not selected_outs:
+        raise RuntimeError(
+            f"Mixed stale batch state detected: a trajectory file was found in '{cwd}' "
+            f"but no matching .out output files were found for the configured outputs "
+            f"({', '.join(output_names) if output_names else 'none'}). Please archive or delete the old run before starting a new batch."
+        )
+
+    if not trajectory_exists and not selected_outs:
+        return
+
+    sim_dir = _next_sim_dir()
+    os.makedirs(sim_dir, exist_ok=True)
+
+    archived = []
+
+    # Move stale trajectories into the SIM folder so they do not remain in the CWD.
+    for traj_path in traj_candidates:
+        dst = os.path.join(sim_dir, os.path.basename(traj_path))
+        if os.path.exists(dst):
+            os.remove(dst)
+        shutil.move(traj_path, dst)
+        archived.append(os.path.basename(traj_path))
+
+    # Copy the selected .out files into the SIM folder, but leave the originals in place
+    # so the next run can continue to write using the configured output names.
+    for out_path in selected_outs:
+        dst = os.path.join(sim_dir, os.path.basename(out_path))
+        if os.path.exists(dst):
+            os.remove(dst)
+        shutil.copy2(out_path, dst)
+        archived.append(os.path.basename(out_path))
+
+    # Copy any non-traj XYZ files (usually the starting geometry) without moving them.
+    for name in os.listdir(cwd):
+        if not name.lower().endswith(".xyz"):
+            continue
+        if "traj" in name.lower():
+            continue
+        full = os.path.join(cwd, name)
+        if not os.path.isfile(full):
+            continue
+        if name in {os.path.basename(p) for p in archived}:
+            continue
+        dst = os.path.join(sim_dir, name)
+        if not os.path.exists(dst):
+            shutil.copy2(full, dst)
+
+    # Copy the input YAML used to launch the new batch so the archived run is reproducible.
+    if os.path.exists(input_file):
+        shutil.copy2(input_file, os.path.join(sim_dir, os.path.basename(input_file)))
+
+    if trajectory_exists:
+        print(f"# Archived stale trajectory outputs in {sim_dir}")
 
 
 def print_version_info() -> None:
@@ -154,6 +315,9 @@ def main() -> None:
 
     with open(args.input_file, "r") as f:
         simulation_parameters = yaml.safe_load(f)
+
+    _archive_previous_batch_outputs(args.input_file, os.getcwd(), simulation_parameters)
+
     early_output_params = simulation_parameters.get("output_details", {})
     verbose = bool(early_output_params.get("verbose", False))
     
@@ -434,7 +598,7 @@ def main() -> None:
 
     # Import md module AFTER setting FENNOL_MODULES_PATH
     from .md import initialize_collision_simulation
-    system = initialize_collision_simulation(simulation_parameters)
+    system = initialize_collision_simulation(simulation_parameters, verbose=verbose)
 
     integrate = system["integrate"]
     # Default: start from initial configuration
