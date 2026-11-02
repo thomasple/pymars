@@ -84,6 +84,17 @@ def run_tsopt(xyz_file,  model_file, log_file, outfile=None, total_charge=0, fma
 
     # convert .trj to .xyz
     traj_frames = read(str(bintraj_file), index=":")  # ":" reads all frames
+    # extxyz requires string keys; Sella stores non-string keys in atoms.info
+    for i, frame in enumerate(traj_frames):
+        energy = frame.get_potential_energy()
+        fmax = np.sqrt((frame.get_forces()**2).sum(axis=1).max())  # ASE's convergence measure
+        frame.calc = None                # drop forces/results from the comment line
+        frame.info.clear()              # remove Sella's non-string/garbage keys
+        frame.info['step'] = i          # frame number
+        frame.info['energy'] = energy   # energy in eV
+        frame.info['fmax'] = fmax
+        print(f"Frame {i}: Energy = {energy:.6f} eV, fmax = {fmax:.6f} eV/Å")
+
     write(str(traj_file), traj_frames)
 
     # delete the binary .trj
@@ -177,8 +188,26 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
     # 6. Find the highest-energy image
     print("Image relaxation complete. Analyzing energies to find highest energy image...")
     energies = [image.get_potential_energy() for image in images]
+
     peak_index = energies.index(max(energies))
-    print(f"Highest energy image found at index {peak_index} with energy {energies[peak_index-1]:.6f} eV.")
+
+    print("NEB band profile (per image):")
+    print(f"{'image':>6} {'energy (eV)':>14}    role")
+    for i, image in enumerate(images):
+        e = energies[i]
+        if i == 0:
+            role = "reactant"
+        elif i == len(images) - 1:
+            role = "product"
+        elif i == peak_index:
+            role = "climbing image"
+        else:
+            role = ""
+    print(f"{i:>6} {e:>14.6f}    {role}")
+
+    print(f"Highest energy image: index {peak_index}, "
+      f"energy {energies[peak_index]:.6f} eV, "
+      f"dE vs reactant = {energies[peak_index] - energies[0]:.6f} eV")
 
     #6B For a zoom refinement, using the immediate neighbors of the peak image as new endpoints and run a new NEB search with closer images
     if mode == "tight":
@@ -197,13 +226,41 @@ def run_tssrc(xyz_file1, xyz_file2, model_file, log_file, n_images=12, outfile=N
 
         energies2 = [im.get_potential_energy() for im in zooms]
         peak2 = int(np.argmax(energies2[1:-1])) + 1
+
+        print("NEB refinement band profile (per image):")
+        print(f"{'image':>6} {'energy (eV)':>14}    role")
+        for i, image in enumerate(zooms):
+            e = energies2[i]
+            fm = np.sqrt((image.get_forces()**2).sum(axis=1).max())
+            if i == 0:
+                role = "reactant"
+            elif i == len(zooms) - 1:
+                role = "product"
+            elif i == peak_index:
+                role = "climbing image"
+            else:
+                role = ""
+        print(f"{i:>6} {e:>14.6f}    {role}")
+
+        print(f"Highest energy image: index {peak2}, "
+        f"energy {energies2[peak2]:.6f} eV, "
+        f"dE vs reactant = {energies2[peak2] - energies2[0]:.6f} eV")
         ts_guess = zooms[peak2].copy()
 
     if mode == "loose":
         ts_guess = images[peak_index].copy()
 
-    #7. convert and clean up trajectory
+    #7. convert, sanitize and clean up trajectory
     neb_frames = read(str(binneb_file), index=":")
+    # extxyz requires string keys; Sella stores non-string keys in atoms.info
+    for i, frame in enumerate(neb_frames):
+        energy = frame.get_potential_energy()
+        frame.calc = None                # drop forces/results from the comment line
+        frame.info.clear()              # remove Sella's non-string/garbage keys
+        frame.info['step'] = i          # frame number
+        frame.info['energy'] = energy   # energy in eV
+        #print(f"Frame {i}: Energy = {energy:.6f} eV")
+
     write(str(traj_xyz_file), neb_frames)
     binneb_file.unlink()
 

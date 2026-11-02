@@ -366,7 +366,7 @@ def main():
             print("Proceeding with default 'medium' effort level.")  
             ts_guess, ts_file = run_tssrc(initial_xyz, final_xyz, model_file, log_file_path, n_images=20, total_charge=total_charge, max_steps=max_search, fmax=src_fmax, mode="loose")
 
-        _vprint(f":Transition state search completed. Transition state guess saved to {ts_file}.")
+        _vprint(f"Transition state search completed. Transition state guess saved to {ts_file}.")
 
         atoms, ts_optfile = run_tsopt(xyz_file=ts_file,
             model_file=model_file,
