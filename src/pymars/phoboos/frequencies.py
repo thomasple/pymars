@@ -241,9 +241,14 @@ def run_freq(xyz_file, model_file, outfile=None, total_charge=0):
     report = _format_report(atoms, vib, energy_conv)
     base = Path(xyz_file).stem
     molden_path = Path(Path(xyz_file).parent, f"{base}.molden")
-    print(f"#DEBUG: filename: molden_path = {molden_path}")
+    #print(f"#DEBUG: filename: molden_path = {molden_path}")
     write_molden_freq(molden_path, atoms, vib.get_frequencies(), [vib.get_mode(i) for i in range(len(vib.get_frequencies()))])
     vib.clean()
+    vibdir = Path(vib.name)
+    if vibdir.is_dir():
+        for f in vibdir.iterdir():
+            f.unlink()
+        vibdir.rmdir()
     print(report)
     if outfile is not None:
         outfile_path = Path(outfile)
