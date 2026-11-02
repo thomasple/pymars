@@ -10,6 +10,16 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "fennol[cuda]>=2025.9.30",
+    "jax>=0.4.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+phoboos = [
+    "ase>=3.23.0",
+    "sella>=2.3.0",
 ]
 
 [project.scripts]
