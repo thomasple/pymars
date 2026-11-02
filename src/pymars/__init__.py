@@ -716,7 +716,7 @@ def main() -> None:
     
     header = f"#{'Step':>10} {'Time[fs]':>12} {'Etot':>12} {'Epot':>12} {'Ekin':>12} {'ns/day':>12}"
     if batch_size == 1:
-        _vprint(header)
+        print(header)
 
     for istep in range(start_step, n_steps):
         coordinates, velocities, accelerations, energies, energy_data, charges, frame_variance = integrate(
@@ -759,7 +759,7 @@ def main() -> None:
 
             line = f" {istep+1:10} {time_str:>12} {total_energy:12.3f} {potential_energy:12.3f} {ekin:12.3f} {ns_per_day:12.1f}"
             if batch_size == 1:
-                _vprint(line)
+                print(line)
 
             if write_traj:
                 coords = np.array(coordinates)
