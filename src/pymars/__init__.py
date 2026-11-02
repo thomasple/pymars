@@ -304,7 +304,20 @@ def main() -> None:
     if "--version" in sys.argv:
         print_version_info()
         sys.exit(0)
-
+    elif "--test" in sys.argv:
+        import subprocess
+        #"Run the project test suite and print results to the terminal."
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        print(f"# Running PyMARS test suite from: {project_root}")
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q"],
+            cwd=project_root,
+            check=False,
+        )
+        print(f"# Test suite completed with return code: {result.returncode}")
+        print(f"# Note: return code 0 indicates all tests passed; non-zero indicates failures.")
+        sys.exit(result.returncode)
+        
     parser = argparse.ArgumentParser(
         description="pymars: A molecular collision simulation package"
     )

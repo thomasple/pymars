@@ -85,7 +85,7 @@ pymars input.yaml
 
 This will run a collision simulation and write a trajectory file (default `trajectory.xyz`).
 
-Recent changes (1.7.4)
+Recent changes (1.7.X)
 -----------------------------------
 
 The last update changed both the examples and the PhoBOOS runtime behavior:
